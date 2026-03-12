@@ -3,11 +3,18 @@ import UIKit
 class MemoryMapViewController: UIViewController {
     
     // MARK: - Properties
-    
-    private let segments: [SegmentModel]
-    private let sections: [SectionModel]
+
+    private let allSegments: [SegmentModel]
+    private let allSections: [SectionModel]
+    private var filteredSegments: [SegmentModel]
+    private var filteredSections: [SectionModel]
     private let fileSize: UInt64
     private let baseAddress: UInt64
+
+    // Protection flag filter state: nil means no filter active, value means require that flag
+    private var filterRead: Bool = false
+    private var filterWrite: Bool = false
+    private var filterExecute: Bool = false
     
     // MARK: - UI Elements
     
@@ -47,12 +54,26 @@ class MemoryMapViewController: UIViewController {
     }()
     
     private lazy var memoryMapView: MemoryMapView = {
-        let view = MemoryMapView(segments: segments, sections: sections, fileSize: fileSize, baseAddress: baseAddress)
+        let view = MemoryMapView(segments: filteredSegments, sections: filteredSections, fileSize: fileSize, baseAddress: baseAddress)
         view.translatesAutoresizingMaskIntoConstraints = false
         view.delegate = self
         return view
     }()
     
+    private let filterStack: UIStackView = {
+        let stack = UIStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .horizontal
+        stack.spacing = 10
+        stack.alignment = .center
+        stack.distribution = .fill
+        return stack
+    }()
+
+    private lazy var filterReadButton: UIButton = createFilterButton(title: "R (Read)", tag: 0)
+    private lazy var filterWriteButton: UIButton = createFilterButton(title: "W (Write)", tag: 1)
+    private lazy var filterExecuteButton: UIButton = createFilterButton(title: "X (Execute)", tag: 2)
+
     private let legendStack: UIStackView = {
         let stack = UIStackView()
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -65,8 +86,10 @@ class MemoryMapViewController: UIViewController {
     // MARK: - Initialization
     
     init(segments: [SegmentModel], sections: [SectionModel], fileSize: UInt64, baseAddress: UInt64) {
-        self.segments = segments
-        self.sections = sections
+        self.allSegments = segments
+        self.allSections = sections
+        self.filteredSegments = segments
+        self.filteredSections = sections
         self.fileSize = fileSize
         self.baseAddress = baseAddress
         super.init(nibName: nil, bundle: nil)
@@ -102,9 +125,23 @@ class MemoryMapViewController: UIViewController {
     private func setupUI() {
         view.addSubview(scrollView)
         scrollView.addSubview(contentStack)
-        
+
+        // Build filter bar
+        let filterLabel = UILabel()
+        filterLabel.font = .systemFont(ofSize: 14, weight: .medium)
+        filterLabel.text = "Filter:"
+        filterLabel.textColor = .secondaryLabel
+        filterLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        filterStack.addArrangedSubview(filterLabel)
+        filterStack.addArrangedSubview(filterReadButton)
+        filterStack.addArrangedSubview(filterWriteButton)
+        filterStack.addArrangedSubview(filterExecuteButton)
+        filterStack.addArrangedSubview(UIView()) // spacer
+
         contentStack.addArrangedSubview(headerLabel)
         contentStack.addArrangedSubview(statsLabel)
+        contentStack.addArrangedSubview(filterStack)
         contentStack.addArrangedSubview(memoryMapView)
         contentStack.addArrangedSubview(createSeparator())
         contentStack.addArrangedSubview(createLegendHeader())
@@ -126,18 +163,43 @@ class MemoryMapViewController: UIViewController {
     }
     
     private func populateStats() {
-        let totalSize = segments.reduce(0) { $0 + $1.vmSize }
-        let executableSections = sections.count // TODO: filter by protection flags if available
-        let writableSections = sections.count // TODO: filter by protection flags if available
-        
-        statsLabel.text = """
+        let totalSize = allSegments.reduce(0) { $0 + $1.vmSize }
+
+        // Filter segments by protection flags (initprot from Mach-O segment commands)
+        // VM_PROT_EXECUTE = 0x04, VM_PROT_WRITE = 0x02, VM_PROT_READ = 0x01
+        let executableSegments = allSegments.filter { ($0.initProt & 0x04) != 0 }
+        let writableSegments = allSegments.filter { ($0.initProt & 0x02) != 0 }
+        let readOnlySegments = allSegments.filter { ($0.initProt & 0x02) == 0 && ($0.initProt & 0x01) != 0 }
+
+        // Count sections belonging to executable/writable segments
+        let executableSectionCount = allSections.filter { section in
+            executableSegments.contains(where: { $0.name == section.segmentName })
+        }.count
+        let writableSectionCount = allSections.filter { section in
+            writableSegments.contains(where: { $0.name == section.segmentName })
+        }.count
+
+        // Detect RWX segments (security concern)
+        let rwxSegments = allSegments.filter { ($0.initProt & 0x07) == 0x07 }
+
+        var statsText = """
         Total VM Size: \(formatBytes(totalSize))
         File Size: \(formatBytes(fileSize))
         Base Address: 0x\(String(format: "%llX", baseAddress))
-        Segments: \(segments.count)
-        Executable Sections: \(executableSections)
-        Writable Sections: \(writableSections)
+        Segments: \(allSegments.count)
+        Executable Segments: \(executableSegments.count)
+        Writable Segments: \(writableSegments.count)
+        Read-only Segments: \(readOnlySegments.count)
+        Executable Sections: \(executableSectionCount)
+        Writable Sections: \(writableSectionCount)
         """
+
+        if !rwxSegments.isEmpty {
+            let names = rwxSegments.map { $0.name }.joined(separator: ", ")
+            statsText += "\n⚠ RWX Segments: \(names)"
+        }
+
+        statsLabel.text = statsText
     }
     
     private func setupLegend() {
@@ -223,8 +285,83 @@ class MemoryMapViewController: UIViewController {
         return formatter.string(fromByteCount: Int64(bytes))
     }
     
+    // MARK: - Filtering
+
+    private func createFilterButton(title: String, tag: Int) -> UIButton {
+        var config = UIButton.Configuration.tinted()
+        config.title = title
+        config.buttonSize = .small
+        config.cornerStyle = .capsule
+        config.baseBackgroundColor = .systemGray
+        config.baseForegroundColor = .label
+
+        let button = UIButton(configuration: config)
+        button.tag = tag
+        button.addTarget(self, action: #selector(filterButtonTapped(_:)), for: .touchUpInside)
+        return button
+    }
+
+    @objc private func filterButtonTapped(_ sender: UIButton) {
+        switch sender.tag {
+        case 0: filterRead.toggle()
+        case 1: filterWrite.toggle()
+        case 2: filterExecute.toggle()
+        default: break
+        }
+        updateFilterButtonAppearance(sender)
+        applyProtectionFilter()
+    }
+
+    private func updateFilterButtonAppearance(_ button: UIButton) {
+        let isActive: Bool
+        switch button.tag {
+        case 0: isActive = filterRead
+        case 1: isActive = filterWrite
+        case 2: isActive = filterExecute
+        default: return
+        }
+
+        let tintColor: UIColor = isActive ? .systemBlue : .systemGray
+        var config = button.configuration ?? .tinted()
+        config.baseBackgroundColor = tintColor
+        config.baseForegroundColor = isActive ? .white : .label
+        button.configuration = config
+    }
+
+    private func applyProtectionFilter() {
+        // Build required protection mask from active filters
+        var requiredMask: UInt32 = 0
+        if filterRead { requiredMask |= 0x01 }
+        if filterWrite { requiredMask |= 0x02 }
+        if filterExecute { requiredMask |= 0x04 }
+
+        if requiredMask == 0 {
+            // No filter active: show all
+            filteredSegments = allSegments
+            filteredSections = allSections
+        } else {
+            // Show only segments whose initProt contains ALL required flags
+            filteredSegments = allSegments.filter { ($0.initProt & requiredMask) == requiredMask }
+
+            // Show sections belonging to the filtered segments
+            let filteredSegmentNames = Set(filteredSegments.map { $0.name })
+            filteredSections = allSections.filter { filteredSegmentNames.contains($0.segmentName) }
+        }
+
+        memoryMapView.updateSegments(filteredSegments, sections: filteredSections)
+
+        // Rebuild base stats, then append filter summary if active
+        populateStats()
+        if requiredMask != 0 {
+            let count = filteredSegments.count
+            let totalSize = filteredSegments.reduce(0) { $0 + $1.vmSize }
+            let sectionCount = filteredSections.count
+            statsLabel.text = (statsLabel.text ?? "") + "\n\nShowing: \(count) segment\(count == 1 ? "" : "s"), \(sectionCount) section\(sectionCount == 1 ? "" : "s") (\(formatBytes(totalSize)))"
+        }
+    }
+
     // MARK: - Actions
-    
+
     @objc private func exportMap() {
         // Render the memory map to an image
         let renderer = UIGraphicsImageRenderer(bounds: memoryMapView.bounds)
@@ -259,7 +396,7 @@ extension MemoryMapViewController: MemoryMapViewDelegate {
     }
     
     private func segmentDetailText(_ segment: SegmentModel) -> String {
-        let segmentSections = sections.filter { $0.segmentName == segment.name }
+        let segmentSections = allSections.filter { $0.segmentName == segment.name }
         
         var details = """
         VM Address: 0x\(String(format: "%llX", segment.vmAddress))
@@ -273,11 +410,8 @@ extension MemoryMapViewController: MemoryMapViewDelegate {
         
         if !segmentSections.isEmpty {
             details += "\n\nSections:\n"
-            for section in segmentSections.prefix(5) {
+            for section in segmentSections {
                 details += "• \(section.sectionName) (\(formatBytes(section.size)))\n"
-            }
-            if segmentSections.count > 5 {
-                details += "... and \(segmentSections.count - 5) more"
             }
         }
         

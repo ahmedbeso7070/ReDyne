@@ -31,14 +31,21 @@ uint32_t string_extract_from_data(StringContext *ctx, const uint8_t *data, size_
                                    uint64_t base_address, const char *section_name, 
                                    uint32_t min_length);
 
-uint32_t string_extract_cstrings(StringContext *ctx, FILE *file, uint64_t offset, 
-                                  uint64_t size, uint64_t vmaddr);
+uint32_t string_extract_cstrings(StringContext *ctx, FILE *file, uint64_t offset,
+                                  uint64_t size, uint64_t vmaddr,
+                                  const char *section_name);
+
+uint32_t string_extract_cfstrings(StringContext *ctx, FILE *file,
+                                   uint64_t section_offset, uint64_t section_size,
+                                   uint64_t section_vmaddr, bool is_64bit,
+                                   const uint8_t *file_data, size_t file_data_size,
+                                   uint64_t text_segment_vmaddr, uint64_t text_segment_fileoff);
 
 void string_context_sort(StringContext *ctx);
 
 void string_context_free(StringContext *ctx);
 
-bool is_printable(char c);
+bool redyne_is_printable(char c);
 
 #endif
 

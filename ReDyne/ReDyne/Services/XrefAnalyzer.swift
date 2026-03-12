@@ -66,25 +66,12 @@ class XrefAnalyzer {
     // MARK: - Public Analysis Method
     
     static func analyze(disassembly: String, symbols: [SymbolInfo]) -> XrefAnalysisResult {
-        print("Starting xref analysis...")
-        let startTime = CFAbsoluteTimeGetCurrent()
         let instructions = parseDisassembly(disassembly)
-        print("Parsed \(instructions.count) instructions")
-        
-        if let first = instructions.first {
-            print("Sample instruction: address=0x\(String(format: "%llx", first.address)), mnemonic=\(first.mnemonic), operands=\(first.operands)")
-        }
-        
+
         let symbolTable = buildSymbolTable(symbols)
         
         var allXrefs: [CrossReference] = []
         var functionXrefsDict: [String: [CrossReference]] = [:]
-        var mnemonicCounts: [String: Int] = [:]
-        for inst in instructions.prefix(1000) {
-            mnemonicCounts[inst.mnemonic, default: 0] += 1
-        }
-        print("Top mnemonics in first 1000: \(mnemonicCounts.sorted { $0.value > $1.value }.prefix(10).map { "\($0.key)(\($0.value))" }.joined(separator: ", "))")
-        
         for instruction in instructions {
             if let xref = analyzeInstruction(instruction, symbolTable: symbolTable) {
                 allXrefs.append(xref)
@@ -97,18 +84,10 @@ class XrefAnalyzer {
             }
         }
         
-        print("Found \(allXrefs.count) cross-references")
-        
         let functionXrefs = buildFunctionXrefs(allXrefs: allXrefs, symbols: symbols, symbolTable: symbolTable)
         let totalCalls = allXrefs.filter { $0.xrefType == .call }.count
         let totalJumps = allXrefs.filter { $0.xrefType == .jump || $0.xrefType == .conditionalJump }.count
         let totalDataRefs = allXrefs.filter { $0.xrefType == .dataRead || $0.xrefType == .dataWrite }.count
-        
-        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-        print("Xref analysis complete in \(String(format: "%.2f", elapsed))s")
-        print("   • \(totalCalls) calls")
-        print("   • \(totalJumps) jumps/branches")
-        print("   • \(totalDataRefs) data references")
         
         return XrefAnalysisResult(
             totalXrefs: allXrefs.count,

@@ -122,6 +122,195 @@ const char* macho_filetype_string(uint32_t filetype) {
     }
 }
 
+#pragma mark - Parse Warning System
+
+void macho_add_warning(MachOContext *ctx, const char *message, uint32_t offset, uint32_t severity) {
+    if (!ctx || ctx->warning_count >= MAX_PARSE_WARNINGS) return;
+    ParseWarning *w = &ctx->warnings[ctx->warning_count++];
+    strncpy(w->message, message, MAX_WARNING_LENGTH - 1);
+    w->message[MAX_WARNING_LENGTH - 1] = '\0';
+    w->offset = offset;
+    w->severity = severity;
+}
+
+#pragma mark - Load Command Name
+
+const char* macho_load_command_name(uint32_t cmd) {
+    switch (cmd) {
+        case LC_SEGMENT: return "LC_SEGMENT";
+        case LC_SYMTAB: return "LC_SYMTAB";
+        case LC_SYMSEG: return "LC_SYMSEG";
+        case LC_THREAD: return "LC_THREAD";
+        case LC_UNIXTHREAD: return "LC_UNIXTHREAD";
+        case LC_LOADFVMLIB: return "LC_LOADFVMLIB";
+        case LC_IDFVMLIB: return "LC_IDFVMLIB";
+        case LC_IDENT: return "LC_IDENT";
+        case LC_FVMFILE: return "LC_FVMFILE";
+        case LC_PREPAGE: return "LC_PREPAGE";
+        case LC_DYSYMTAB: return "LC_DYSYMTAB";
+        case LC_LOAD_DYLIB: return "LC_LOAD_DYLIB";
+        case LC_ID_DYLIB: return "LC_ID_DYLIB";
+        case LC_LOAD_DYLINKER: return "LC_LOAD_DYLINKER";
+        case LC_ID_DYLINKER: return "LC_ID_DYLINKER";
+        case LC_PREBOUND_DYLIB: return "LC_PREBOUND_DYLIB";
+        case LC_ROUTINES: return "LC_ROUTINES";
+        case LC_SUB_FRAMEWORK: return "LC_SUB_FRAMEWORK";
+        case LC_SUB_UMBRELLA: return "LC_SUB_UMBRELLA";
+        case LC_SUB_CLIENT: return "LC_SUB_CLIENT";
+        case LC_SUB_LIBRARY: return "LC_SUB_LIBRARY";
+        case LC_TWOLEVEL_HINTS: return "LC_TWOLEVEL_HINTS";
+        case LC_PREBIND_CKSUM: return "LC_PREBIND_CKSUM";
+        case LC_LOAD_WEAK_DYLIB: return "LC_LOAD_WEAK_DYLIB";
+        case LC_SEGMENT_64: return "LC_SEGMENT_64";
+        case LC_ROUTINES_64: return "LC_ROUTINES_64";
+        case LC_UUID: return "LC_UUID";
+        case LC_RPATH: return "LC_RPATH";
+        case LC_CODE_SIGNATURE: return "LC_CODE_SIGNATURE";
+        case LC_SEGMENT_SPLIT_INFO: return "LC_SEGMENT_SPLIT_INFO";
+        case LC_REEXPORT_DYLIB: return "LC_REEXPORT_DYLIB";
+        case LC_LAZY_LOAD_DYLIB: return "LC_LAZY_LOAD_DYLIB";
+        case LC_ENCRYPTION_INFO: return "LC_ENCRYPTION_INFO";
+        case LC_DYLD_INFO: return "LC_DYLD_INFO";
+        case LC_DYLD_INFO_ONLY: return "LC_DYLD_INFO_ONLY";
+        case LC_LOAD_UPWARD_DYLIB: return "LC_LOAD_UPWARD_DYLIB";
+        case LC_VERSION_MIN_MACOSX: return "LC_VERSION_MIN_MACOSX";
+        case LC_VERSION_MIN_IPHONEOS: return "LC_VERSION_MIN_IPHONEOS";
+        case LC_FUNCTION_STARTS: return "LC_FUNCTION_STARTS";
+        case LC_DYLD_ENVIRONMENT: return "LC_DYLD_ENVIRONMENT";
+        case LC_MAIN: return "LC_MAIN";
+        case LC_DATA_IN_CODE: return "LC_DATA_IN_CODE";
+        case LC_SOURCE_VERSION: return "LC_SOURCE_VERSION";
+        case LC_DYLIB_CODE_SIGN_DRS: return "LC_DYLIB_CODE_SIGN_DRS";
+        case LC_ENCRYPTION_INFO_64: return "LC_ENCRYPTION_INFO_64";
+        case LC_LINKER_OPTION: return "LC_LINKER_OPTION";
+        case LC_LINKER_OPTIMIZATION_HINT: return "LC_LINKER_OPTIMIZATION_HINT";
+        case LC_VERSION_MIN_TVOS: return "LC_VERSION_MIN_TVOS";
+        case LC_VERSION_MIN_WATCHOS: return "LC_VERSION_MIN_WATCHOS";
+        case LC_NOTE: return "LC_NOTE";
+        case LC_BUILD_VERSION: return "LC_BUILD_VERSION";
+        case LC_DYLD_EXPORTS_TRIE: return "LC_DYLD_EXPORTS_TRIE";
+        case LC_DYLD_CHAINED_FIXUPS: return "LC_DYLD_CHAINED_FIXUPS";
+        case LC_FILESET_ENTRY: return "LC_FILESET_ENTRY";
+        default: return "LC_UNKNOWN";
+    }
+}
+
+#pragma mark - Flags Description
+
+const char* macho_flags_description(uint32_t flags, char *buffer, size_t bufsize) {
+    if (!buffer || bufsize == 0) return "";
+    buffer[0] = '\0';
+
+    struct { uint32_t flag; const char *name; } flag_table[] = {
+        { MH_NOUNDEFS, "MH_NOUNDEFS" },
+        { MH_INCRLINK, "MH_INCRLINK" },
+        { MH_DYLDLINK, "MH_DYLDLINK" },
+        { MH_BINDATLOAD, "MH_BINDATLOAD" },
+        { MH_PREBOUND, "MH_PREBOUND" },
+        { MH_SPLIT_SEGS, "MH_SPLIT_SEGS" },
+        { MH_LAZY_INIT, "MH_LAZY_INIT" },
+        { MH_TWOLEVEL, "MH_TWOLEVEL" },
+        { MH_FORCE_FLAT, "MH_FORCE_FLAT" },
+        { MH_NOMULTIDEFS, "MH_NOMULTIDEFS" },
+        { MH_NOFIXPREBINDING, "MH_NOFIXPREBINDING" },
+        { MH_PREBINDABLE, "MH_PREBINDABLE" },
+        { MH_ALLMODSBOUND, "MH_ALLMODSBOUND" },
+        { MH_SUBSECTIONS_VIA_SYMBOLS, "MH_SUBSECTIONS_VIA_SYMBOLS" },
+        { MH_CANONICAL, "MH_CANONICAL" },
+        { MH_WEAK_DEFINES, "MH_WEAK_DEFINES" },
+        { MH_BINDS_TO_WEAK, "MH_BINDS_TO_WEAK" },
+        { MH_ALLOW_STACK_EXECUTION, "MH_ALLOW_STACK_EXECUTION" },
+        { MH_ROOT_SAFE, "MH_ROOT_SAFE" },
+        { MH_SETUID_SAFE, "MH_SETUID_SAFE" },
+        { MH_NO_REEXPORTED_DYLIBS, "MH_NO_REEXPORTED_DYLIBS" },
+        { MH_PIE, "MH_PIE" },
+        { MH_HAS_TLV_DESCRIPTORS, "MH_HAS_TLV_DESCRIPTORS" },
+        { MH_NO_HEAP_EXECUTION, "MH_NO_HEAP_EXECUTION" },
+        { MH_APP_EXTENSION_SAFE, "MH_APP_EXTENSION_SAFE" },
+        { MH_DYLIB_IN_CACHE, "MH_DYLIB_IN_CACHE" },
+    };
+
+    size_t count = sizeof(flag_table) / sizeof(flag_table[0]);
+    size_t pos = 0;
+    bool first = true;
+
+    for (size_t i = 0; i < count; i++) {
+        if (flags & flag_table[i].flag) {
+            size_t needed = strlen(flag_table[i].name) + (first ? 0 : 2);
+            if (pos + needed + 1 >= bufsize) break;
+            if (!first) {
+                buffer[pos++] = ',';
+                buffer[pos++] = ' ';
+            }
+            strcpy(buffer + pos, flag_table[i].name);
+            pos += strlen(flag_table[i].name);
+            first = false;
+        }
+    }
+    buffer[pos] = '\0';
+    return buffer;
+}
+
+#pragma mark - Platform String
+
+const char* macho_platform_string(uint32_t platform) {
+    switch (platform) {
+        case PLATFORM_UNKNOWN: return "Unknown";
+        case PLATFORM_MACOS: return "macOS";
+        case PLATFORM_IOS: return "iOS";
+        case PLATFORM_TVOS: return "tvOS";
+        case PLATFORM_WATCHOS: return "watchOS";
+        case PLATFORM_BRIDGEOS: return "bridgeOS";
+        case PLATFORM_MACCATALYST: return "Mac Catalyst";
+        case PLATFORM_IOSSIMULATOR: return "iOS Simulator";
+        case PLATFORM_TVOSSIMULATOR: return "tvOS Simulator";
+        case PLATFORM_WATCHOSSIMULATOR: return "watchOS Simulator";
+        case PLATFORM_DRIVERKIT: return "DriverKit";
+        case PLATFORM_VISIONOS: return "visionOS";
+        case PLATFORM_VISIONOSSIMULATOR: return "visionOS Simulator";
+        case PLATFORM_FIRMWARE: return "Firmware";
+        case PLATFORM_SEPOS: return "SepOS";
+        default: return "Unknown Platform";
+    }
+}
+
+#pragma mark - Entry Point Resolution
+
+bool macho_resolve_entry_point(MachOContext *ctx) {
+    if (!ctx || !ctx->has_entry_point) return false;
+
+    // Find __TEXT segment vmaddr
+    for (uint32_t i = 0; i < ctx->segment_count; i++) {
+        if (strncmp(ctx->segments[i].segname, "__TEXT", 16) == 0) {
+            ctx->entry_point_address = ctx->segments[i].vmaddr + ctx->entry_point_offset;
+            return true;
+        }
+    }
+    return false;
+}
+
+#pragma mark - Load Command Validation
+
+bool macho_validate_load_commands(MachOContext *ctx) {
+    if (!ctx) return false;
+
+    if (ctx->header.ncmds > MAX_LOAD_COMMANDS) {
+        char msg[MAX_WARNING_LENGTH];
+        snprintf(msg, sizeof(msg), "Excessive load command count: %u (max %d)", ctx->header.ncmds, MAX_LOAD_COMMANDS);
+        macho_add_warning(ctx, msg, 0, 2);
+        return false;
+    }
+
+    if (ctx->header.sizeofcmds > (uint32_t)ctx->file_size) {
+        char msg[MAX_WARNING_LENGTH];
+        snprintf(msg, sizeof(msg), "sizeofcmds (%u) exceeds file size (%ld)", ctx->header.sizeofcmds, ctx->file_size);
+        macho_add_warning(ctx, msg, 0, 2);
+        return false;
+    }
+
+    return true;
+}
+
 #pragma mark - Context Management
 
 MachOContext* macho_open(const char *filepath, char *error_msg) {
@@ -197,7 +386,10 @@ void macho_close(MachOContext *ctx) {
     }
     if (ctx->segments) free(ctx->segments);
     if (ctx->sections) free(ctx->sections);
-    
+    for (uint32_t i = 0; i < ctx->rpath_count; i++) {
+        if (ctx->rpaths[i]) free(ctx->rpaths[i]);
+    }
+
     free(ctx);
 }
 
@@ -383,30 +575,65 @@ bool macho_parse_header(MachOContext *ctx) {
 
 bool macho_parse_load_commands(MachOContext *ctx) {
     if (!ctx || !ctx->file || ctx->header.ncmds == 0) return false;
-    
+
+    // Validate load command counts before allocating
+    if (!macho_validate_load_commands(ctx)) return false;
+
+    // Extract security flags from header
+    ctx->is_pie = (ctx->header.flags & MH_PIE) != 0;
+    ctx->allows_stack_execution = (ctx->header.flags & MH_ALLOW_STACK_EXECUTION) != 0;
+    ctx->no_heap_execution = (ctx->header.flags & MH_NO_HEAP_EXECUTION) != 0;
+
     ctx->load_command_count = ctx->header.ncmds;
     ctx->load_commands = calloc(ctx->load_command_count, sizeof(LoadCommandInfo));
     if (!ctx->load_commands) return false;
-    
+
+    uint32_t sizeofcmds_remaining = ctx->header.sizeofcmds;
+
     for (uint32_t i = 0; i < ctx->header.ncmds; i++) {
         struct load_command lc;
         long cmd_offset = ftell(ctx->file);
-        
+
         if (fread(&lc, sizeof(struct load_command), 1, ctx->file) != 1) return false;
-        
+
         if (ctx->header.is_swapped) {
             lc.cmd = swap_uint32(lc.cmd);
             lc.cmdsize = swap_uint32(lc.cmdsize);
         }
-        
+
+        // Validate cmdsize
+        if (lc.cmdsize < 8) {
+            char msg[MAX_WARNING_LENGTH];
+            snprintf(msg, sizeof(msg), "Load command %u has invalid cmdsize %u (min 8)", i, lc.cmdsize);
+            macho_add_warning(ctx, msg, (uint32_t)cmd_offset, 2);
+            return false;
+        }
+
+        if (lc.cmdsize > sizeofcmds_remaining) {
+            char msg[MAX_WARNING_LENGTH];
+            snprintf(msg, sizeof(msg), "Load command %u cmdsize %u exceeds remaining sizeofcmds %u", i, lc.cmdsize, sizeofcmds_remaining);
+            macho_add_warning(ctx, msg, (uint32_t)cmd_offset, 2);
+            return false;
+        }
+
+        // Bounds check against file size
+        if ((uint64_t)cmd_offset + lc.cmdsize > (uint64_t)ctx->file_size) {
+            char msg[MAX_WARNING_LENGTH];
+            snprintf(msg, sizeof(msg), "Load command %u extends beyond file (offset %ld + size %u > %ld)", i, cmd_offset, lc.cmdsize, ctx->file_size);
+            macho_add_warning(ctx, msg, (uint32_t)cmd_offset, 2);
+            return false;
+        }
+
+        sizeofcmds_remaining -= lc.cmdsize;
+
         ctx->load_commands[i].cmd = lc.cmd;
         ctx->load_commands[i].cmdsize = lc.cmdsize;
         ctx->load_commands[i].data = malloc(lc.cmdsize);
         if (!ctx->load_commands[i].data) return false;
-        
+
         fseek(ctx->file, cmd_offset, SEEK_SET);
         if (fread(ctx->load_commands[i].data, lc.cmdsize, 1, ctx->file) != 1) return false;
-        
+
         switch (lc.cmd) {
             case LC_SYMTAB: {
                 struct symtab_command *symtab = (struct symtab_command*)ctx->load_commands[i].data;
@@ -417,8 +644,7 @@ bool macho_parse_load_commands(MachOContext *ctx) {
                 break;
             }
             case LC_DYSYMTAB: {
-                struct dysymtab_command *dysym = (struct dysymtab_command*)ctx->load_commands[i].data;
-                ctx->dysymtab_offset = ftell(ctx->file);
+                ctx->dysymtab_offset = (uint32_t)cmd_offset;
                 break;
             }
             case LC_DYLD_INFO:
@@ -429,6 +655,10 @@ bool macho_parse_load_commands(MachOContext *ctx) {
                 ctx->rebase_size = ctx->header.is_swapped ? swap_uint32(dyld->rebase_size) : dyld->rebase_size;
                 ctx->bind_off = ctx->header.is_swapped ? swap_uint32(dyld->bind_off) : dyld->bind_off;
                 ctx->bind_size = ctx->header.is_swapped ? swap_uint32(dyld->bind_size) : dyld->bind_size;
+                ctx->weak_bind_off = ctx->header.is_swapped ? swap_uint32(dyld->weak_bind_off) : dyld->weak_bind_off;
+                ctx->weak_bind_size = ctx->header.is_swapped ? swap_uint32(dyld->weak_bind_size) : dyld->weak_bind_size;
+                ctx->lazy_bind_off = ctx->header.is_swapped ? swap_uint32(dyld->lazy_bind_off) : dyld->lazy_bind_off;
+                ctx->lazy_bind_size = ctx->header.is_swapped ? swap_uint32(dyld->lazy_bind_size) : dyld->lazy_bind_size;
                 ctx->export_off = ctx->header.is_swapped ? swap_uint32(dyld->export_off) : dyld->export_off;
                 ctx->export_size = ctx->header.is_swapped ? swap_uint32(dyld->export_size) : dyld->export_size;
                 break;
@@ -448,9 +678,138 @@ bool macho_parse_load_commands(MachOContext *ctx) {
                 ctx->has_uuid = true;
                 break;
             }
+            case LC_MAIN: {
+                struct entry_point_command *ep = (struct entry_point_command*)ctx->load_commands[i].data;
+                ctx->has_entry_point = true;
+                ctx->entry_point_offset = ctx->header.is_swapped ? swap_uint64(ep->entryoff) : ep->entryoff;
+                break;
+            }
+            case LC_FUNCTION_STARTS: {
+                struct linkedit_data_command *ldc = (struct linkedit_data_command*)ctx->load_commands[i].data;
+                ctx->has_function_starts = true;
+                ctx->function_starts_offset = ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff;
+                ctx->function_starts_size = ctx->header.is_swapped ? swap_uint32(ldc->datasize) : ldc->datasize;
+                break;
+            }
+            case LC_DATA_IN_CODE: {
+                struct linkedit_data_command *ldc = (struct linkedit_data_command*)ctx->load_commands[i].data;
+                ctx->has_data_in_code = true;
+                ctx->data_in_code_offset = ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff;
+                ctx->data_in_code_size = ctx->header.is_swapped ? swap_uint32(ldc->datasize) : ldc->datasize;
+                break;
+            }
+            case LC_DYLD_CHAINED_FIXUPS: {
+                struct linkedit_data_command *ldc = (struct linkedit_data_command*)ctx->load_commands[i].data;
+                ctx->has_chained_fixups = true;
+                ctx->chained_fixups_offset = ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff;
+                ctx->chained_fixups_size = ctx->header.is_swapped ? swap_uint32(ldc->datasize) : ldc->datasize;
+                break;
+            }
+            case LC_DYLD_EXPORTS_TRIE: {
+                struct linkedit_data_command *ldc = (struct linkedit_data_command*)ctx->load_commands[i].data;
+                ctx->has_exports_trie = true;
+                ctx->exports_trie_offset = ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff;
+                ctx->exports_trie_size = ctx->header.is_swapped ? swap_uint32(ldc->datasize) : ldc->datasize;
+                break;
+            }
+            case LC_BUILD_VERSION: {
+                struct build_version_command *bv = (struct build_version_command*)ctx->load_commands[i].data;
+                ctx->platform = ctx->header.is_swapped ? swap_uint32(bv->platform) : bv->platform;
+                ctx->minos = ctx->header.is_swapped ? swap_uint32(bv->minos) : bv->minos;
+                ctx->sdk = ctx->header.is_swapped ? swap_uint32(bv->sdk) : bv->sdk;
+                ctx->build_tool_count = ctx->header.is_swapped ? swap_uint32(bv->ntools) : bv->ntools;
+                break;
+            }
+            case LC_SOURCE_VERSION: {
+                struct source_version_command *sv = (struct source_version_command*)ctx->load_commands[i].data;
+                ctx->source_version = ctx->header.is_swapped ? swap_uint64(sv->version) : sv->version;
+                ctx->has_source_version = true;
+                break;
+            }
+            case LC_RPATH: {
+                struct rpath_command *rp = (struct rpath_command*)ctx->load_commands[i].data;
+                uint32_t path_offset = ctx->header.is_swapped ? swap_uint32(rp->path.offset) : rp->path.offset;
+                if (path_offset < lc.cmdsize && ctx->rpath_count < MAX_RPATHS) {
+                    const char *path_str = (const char*)rp + path_offset;
+                    size_t max_len = lc.cmdsize - path_offset;
+                    size_t path_len = strnlen(path_str, max_len);
+                    ctx->rpaths[ctx->rpath_count] = malloc(path_len + 1);
+                    if (ctx->rpaths[ctx->rpath_count]) {
+                        memcpy(ctx->rpaths[ctx->rpath_count], path_str, path_len);
+                        ctx->rpaths[ctx->rpath_count][path_len] = '\0';
+                        ctx->rpath_count++;
+                    }
+                }
+                break;
+            }
+            case LC_LOAD_DYLIB:
+            case LC_LOAD_WEAK_DYLIB:
+            case LC_LAZY_LOAD_DYLIB:
+            case LC_REEXPORT_DYLIB:
+                // Tracked via load_commands array; no extra extraction needed
+                break;
+            case LC_LINKER_OPTION: {
+                ctx->linker_option_count++;
+                break;
+            }
+            case LC_SEGMENT:
+            case LC_SEGMENT_64:
+            case LC_CODE_SIGNATURE:
+            case LC_SEGMENT_SPLIT_INFO:
+            case LC_ID_DYLIB:
+            case LC_LOAD_DYLINKER:
+            case LC_ID_DYLINKER:
+            case LC_PREBOUND_DYLIB:
+            case LC_ROUTINES:
+            case LC_ROUTINES_64:
+            case LC_SUB_FRAMEWORK:
+            case LC_SUB_UMBRELLA:
+            case LC_SUB_CLIENT:
+            case LC_SUB_LIBRARY:
+            case LC_TWOLEVEL_HINTS:
+            case LC_PREBIND_CKSUM:
+            case LC_VERSION_MIN_MACOSX:
+            case LC_VERSION_MIN_IPHONEOS:
+            case LC_VERSION_MIN_TVOS:
+            case LC_VERSION_MIN_WATCHOS: {
+                // Fallback platform info for older binaries without LC_BUILD_VERSION
+                if (ctx->platform == 0) {
+                    struct version_min_command *vm = (struct version_min_command*)ctx->load_commands[i].data;
+                    ctx->min_version = ctx->header.is_swapped ? swap_uint32(vm->version) : vm->version;
+                    ctx->sdk_version = ctx->header.is_swapped ? swap_uint32(vm->sdk) : vm->sdk;
+                    // Map LC type to platform constant as fallback
+                    switch (lc.cmd) {
+                        case LC_VERSION_MIN_MACOSX:    ctx->platform = PLATFORM_MACOS;   break;
+                        case LC_VERSION_MIN_IPHONEOS:  ctx->platform = PLATFORM_IOS;     break;
+                        case LC_VERSION_MIN_TVOS:      ctx->platform = PLATFORM_TVOS;    break;
+                        case LC_VERSION_MIN_WATCHOS:   ctx->platform = PLATFORM_WATCHOS; break;
+                        default: break;
+                    }
+                    ctx->minos = ctx->min_version;
+                    ctx->sdk = ctx->sdk_version;
+                }
+                break;
+            }
+            case LC_DYLD_ENVIRONMENT:
+            case LC_THREAD:
+            case LC_UNIXTHREAD:
+            case LC_LOAD_UPWARD_DYLIB:
+            case LC_DYLIB_CODE_SIGN_DRS:
+            case LC_LINKER_OPTIMIZATION_HINT:
+            case LC_NOTE:
+            case LC_FILESET_ENTRY:
+                // Known commands handled elsewhere or no extra data needed
+                break;
+            default: {
+                char msg[MAX_WARNING_LENGTH];
+                snprintf(msg, sizeof(msg), "Unrecognized load command 0x%X (%s) at offset %ld",
+                         lc.cmd, macho_load_command_name(lc.cmd), cmd_offset);
+                macho_add_warning(ctx, msg, (uint32_t)cmd_offset, 1);
+                break;
+            }
         }
     }
-    
+
     return true;
 }
 
@@ -458,25 +817,33 @@ bool macho_parse_load_commands(MachOContext *ctx) {
 
 uint32_t macho_extract_segments(MachOContext *ctx) {
     if (!ctx || !ctx->load_commands) return 0;
-    
+
     uint32_t seg_count = 0;
     for (uint32_t i = 0; i < ctx->load_command_count; i++) {
         if (ctx->load_commands[i].cmd == LC_SEGMENT_64 || ctx->load_commands[i].cmd == LC_SEGMENT) {
             seg_count++;
         }
     }
-    
+
     if (seg_count == 0) return 0;
-    
+
+    // Validate segment count
+    if (seg_count > MAX_SEGMENTS) {
+        char msg[MAX_WARNING_LENGTH];
+        snprintf(msg, sizeof(msg), "Excessive segment count: %u (max %d)", seg_count, MAX_SEGMENTS);
+        macho_add_warning(ctx, msg, 0, 2);
+        seg_count = MAX_SEGMENTS;
+    }
+
     ctx->segments = calloc(seg_count, sizeof(SegmentInfo));
     if (!ctx->segments) return 0;
-    
+
     ctx->segment_count = 0;
-    for (uint32_t i = 0; i < ctx->load_command_count; i++) {
+    for (uint32_t i = 0; i < ctx->load_command_count && ctx->segment_count < seg_count; i++) {
         if (ctx->load_commands[i].cmd == LC_SEGMENT_64) {
             struct segment_command_64 *seg = (struct segment_command_64*)ctx->load_commands[i].data;
             SegmentInfo *info = &ctx->segments[ctx->segment_count++];
-            
+
             strncpy(info->segname, seg->segname, 16);
             info->vmaddr = ctx->header.is_swapped ? swap_uint64(seg->vmaddr) : seg->vmaddr;
             info->vmsize = ctx->header.is_swapped ? swap_uint64(seg->vmsize) : seg->vmsize;
@@ -486,10 +853,30 @@ uint32_t macho_extract_segments(MachOContext *ctx) {
             info->initprot = ctx->header.is_swapped ? swap_uint32(seg->initprot) : seg->initprot;
             info->nsects = ctx->header.is_swapped ? swap_uint32(seg->nsects) : seg->nsects;
             info->flags = ctx->header.is_swapped ? swap_uint32(seg->flags) : seg->flags;
+
+            // Validate fileoff + filesize against file size
+            if (info->filesize > 0 && (info->fileoff + info->filesize > (uint64_t)ctx->file_size)) {
+                char msg[MAX_WARNING_LENGTH];
+                snprintf(msg, sizeof(msg), "Segment %.16s file range [0x%llx, 0x%llx) exceeds file size %ld",
+                         info->segname, info->fileoff, info->fileoff + info->filesize, ctx->file_size);
+                macho_add_warning(ctx, msg, (uint32_t)info->fileoff, 1);
+            }
+
+            // Warn on RWX segments (initprot has read, write, and execute)
+            if ((info->initprot & 0x7) == 0x7) {
+                char msg[MAX_WARNING_LENGTH];
+                snprintf(msg, sizeof(msg), "Segment %.16s has RWX permissions (initprot=0x%x)", info->segname, info->initprot);
+                macho_add_warning(ctx, msg, 0, 1);
+            }
+
+            // Check for __RESTRICT segment
+            if (strncmp(info->segname, "__RESTRICT", 16) == 0) {
+                ctx->has_restrict_segment = true;
+            }
         } else if (ctx->load_commands[i].cmd == LC_SEGMENT) {
             struct segment_command *seg = (struct segment_command*)ctx->load_commands[i].data;
             SegmentInfo *info = &ctx->segments[ctx->segment_count++];
-            
+
             strncpy(info->segname, seg->segname, 16);
             info->vmaddr = ctx->header.is_swapped ? swap_uint32(seg->vmaddr) : seg->vmaddr;
             info->vmsize = ctx->header.is_swapped ? swap_uint32(seg->vmsize) : seg->vmsize;
@@ -499,34 +886,72 @@ uint32_t macho_extract_segments(MachOContext *ctx) {
             info->initprot = ctx->header.is_swapped ? swap_uint32(seg->initprot) : seg->initprot;
             info->nsects = ctx->header.is_swapped ? swap_uint32(seg->nsects) : seg->nsects;
             info->flags = ctx->header.is_swapped ? swap_uint32(seg->flags) : seg->flags;
+
+            // Validate fileoff + filesize against file size
+            if (info->filesize > 0 && (info->fileoff + info->filesize > (uint64_t)ctx->file_size)) {
+                char msg[MAX_WARNING_LENGTH];
+                snprintf(msg, sizeof(msg), "Segment %.16s file range [0x%llx, 0x%llx) exceeds file size %ld",
+                         info->segname, info->fileoff, info->fileoff + info->filesize, ctx->file_size);
+                macho_add_warning(ctx, msg, (uint32_t)info->fileoff, 1);
+            }
+
+            // Warn on RWX segments
+            if ((info->initprot & 0x7) == 0x7) {
+                char msg[MAX_WARNING_LENGTH];
+                snprintf(msg, sizeof(msg), "Segment %.16s has RWX permissions (initprot=0x%x)", info->segname, info->initprot);
+                macho_add_warning(ctx, msg, 0, 1);
+            }
+
+            // Check for __RESTRICT segment
+            if (strncmp(info->segname, "__RESTRICT", 16) == 0) {
+                ctx->has_restrict_segment = true;
+            }
         }
     }
-    
+
     return ctx->segment_count;
 }
 
 uint32_t macho_extract_sections(MachOContext *ctx) {
     if (!ctx || !ctx->load_commands) return 0;
-    
+
     uint32_t sect_count = 0;
     for (uint32_t i = 0; i < ctx->segment_count; i++) {
         sect_count += ctx->segments[i].nsects;
     }
-    
+
     if (sect_count == 0) return 0;
-    
+
+    // Validate section count
+    if (sect_count > MAX_SECTIONS) {
+        char msg[MAX_WARNING_LENGTH];
+        snprintf(msg, sizeof(msg), "Excessive section count: %u (max %d)", sect_count, MAX_SECTIONS);
+        macho_add_warning(ctx, msg, 0, 2);
+        sect_count = MAX_SECTIONS;
+    }
+
     ctx->sections = calloc(sect_count, sizeof(SectionInfo));
     if (!ctx->sections) return 0;
-    
+
     ctx->section_count = 0;
-    
-    for (uint32_t i = 0; i < ctx->load_command_count; i++) {
+
+    // Build a segment index to look up parent segment info for validation
+    uint32_t seg_idx = 0;
+
+    for (uint32_t i = 0; i < ctx->load_command_count && ctx->section_count < sect_count; i++) {
         if (ctx->load_commands[i].cmd == LC_SEGMENT_64) {
             struct segment_command_64 *seg = (struct segment_command_64*)ctx->load_commands[i].data;
             uint32_t nsects = ctx->header.is_swapped ? swap_uint32(seg->nsects) : seg->nsects;
             struct section_64 *sections = (struct section_64*)((char*)seg + sizeof(struct segment_command_64));
-            
-            for (uint32_t j = 0; j < nsects; j++) {
+
+            // Find matching parent segment for bounds checking
+            uint64_t seg_fileoff = 0, seg_filesize = 0;
+            if (seg_idx < ctx->segment_count) {
+                seg_fileoff = ctx->segments[seg_idx].fileoff;
+                seg_filesize = ctx->segments[seg_idx].filesize;
+            }
+
+            for (uint32_t j = 0; j < nsects && ctx->section_count < sect_count; j++) {
                 SectionInfo *info = &ctx->sections[ctx->section_count++];
                 strncpy(info->sectname, sections[j].sectname, 16);
                 strncpy(info->segname, sections[j].segname, 16);
@@ -535,10 +960,53 @@ uint32_t macho_extract_sections(MachOContext *ctx) {
                 info->offset = ctx->header.is_swapped ? swap_uint32(sections[j].offset) : sections[j].offset;
                 info->align = ctx->header.is_swapped ? swap_uint32(sections[j].align) : sections[j].align;
                 info->flags = ctx->header.is_swapped ? swap_uint32(sections[j].flags) : sections[j].flags;
+
+                // Validate section offset falls within parent segment bounds
+                if (info->offset > 0 && seg_filesize > 0) {
+                    if (info->offset < seg_fileoff || info->offset >= seg_fileoff + seg_filesize) {
+                        char msg[MAX_WARNING_LENGTH];
+                        snprintf(msg, sizeof(msg), "Section %.16s,%.16s offset 0x%x outside parent segment [0x%llx, 0x%llx)",
+                                 info->segname, info->sectname, info->offset, seg_fileoff, seg_fileoff + seg_filesize);
+                        macho_add_warning(ctx, msg, info->offset, 1);
+                    }
+                }
             }
+            seg_idx++;
+        } else if (ctx->load_commands[i].cmd == LC_SEGMENT) {
+            struct segment_command *seg = (struct segment_command*)ctx->load_commands[i].data;
+            uint32_t nsects = ctx->header.is_swapped ? swap_uint32(seg->nsects) : seg->nsects;
+            struct section *sections = (struct section*)((char*)seg + sizeof(struct segment_command));
+
+            uint64_t seg_fileoff = 0, seg_filesize = 0;
+            if (seg_idx < ctx->segment_count) {
+                seg_fileoff = ctx->segments[seg_idx].fileoff;
+                seg_filesize = ctx->segments[seg_idx].filesize;
+            }
+
+            for (uint32_t j = 0; j < nsects && ctx->section_count < sect_count; j++) {
+                SectionInfo *info = &ctx->sections[ctx->section_count++];
+                strncpy(info->sectname, sections[j].sectname, 16);
+                strncpy(info->segname, sections[j].segname, 16);
+                info->addr = ctx->header.is_swapped ? swap_uint32(sections[j].addr) : sections[j].addr;
+                info->size = ctx->header.is_swapped ? swap_uint32(sections[j].size) : sections[j].size;
+                info->offset = ctx->header.is_swapped ? swap_uint32(sections[j].offset) : sections[j].offset;
+                info->align = ctx->header.is_swapped ? swap_uint32(sections[j].align) : sections[j].align;
+                info->flags = ctx->header.is_swapped ? swap_uint32(sections[j].flags) : sections[j].flags;
+
+                // Validate section offset falls within parent segment bounds
+                if (info->offset > 0 && seg_filesize > 0) {
+                    if (info->offset < seg_fileoff || info->offset >= seg_fileoff + seg_filesize) {
+                        char msg[MAX_WARNING_LENGTH];
+                        snprintf(msg, sizeof(msg), "Section %.16s,%.16s offset 0x%x outside parent segment [0x%llx, 0x%llx)",
+                                 info->segname, info->sectname, info->offset, seg_fileoff, seg_fileoff + seg_filesize);
+                        macho_add_warning(ctx, msg, info->offset, 1);
+                    }
+                }
+            }
+            seg_idx++;
         }
     }
-    
+
     return ctx->section_count;
 }
 

@@ -16,6 +16,14 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSString *minVersion;
 @property (nonatomic, copy, nullable) NSString *sdkVersion;
 @property (nonatomic, assign) BOOL isEncrypted;
+@property (nonatomic, assign) uint32_t rawFlags;
+@property (nonatomic, copy, nullable) NSString *flagsDescription;
+@property (nonatomic, copy, nullable) NSString *platformName;
+@property (nonatomic, copy, nullable) NSString *sourceVersion;
+@property (nonatomic, assign) BOOL isPIE;
+@property (nonatomic, assign) BOOL hasEntryPoint;
+@property (nonatomic, assign) uint64_t entryPointAddress;
+@property (nonatomic, assign) BOOL hasChainedFixups;
 
 @end
 
@@ -29,6 +37,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) uint64_t fileOffset;
 @property (nonatomic, assign) uint64_t fileSize;
 @property (nonatomic, copy) NSString *protection;
+@property (nonatomic, assign) uint32_t initProt;
+@property (nonatomic, assign) uint32_t maxProt;
 
 @end
 
@@ -58,6 +68,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) BOOL isExternal;
 @property (nonatomic, assign) BOOL isWeak;
 @property (nonatomic, assign) BOOL isFunction;
+@property (nonatomic, copy, nullable) NSString *demangledName;
 
 @end
 
@@ -107,6 +118,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) uint32_t instructionCount;
 @property (nonatomic, strong, nullable) NSArray<InstructionModel *> *instructions;
 @property (nonatomic, copy, nullable) NSString *pseudocode;
+@property (nonatomic, copy, nullable) NSString *demangledName;
 
 @end
 
@@ -126,6 +138,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong, nullable) id importExportAnalysis;
 @property (nonatomic, strong, nullable) id codeSigningAnalysis;
 @property (nonatomic, strong, nullable) id cfgAnalysis;
+@property (nonatomic, strong, nullable) id securityPosture;
+@property (nonatomic, strong, nullable) id swiftMetadata;
 
 @property (nonatomic, copy) NSString *filePath;
 @property (nonatomic, copy) NSString *fileName;

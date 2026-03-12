@@ -11,10 +11,16 @@ enum AnalysisType: String, CaseIterable {
     case dependencies = "Dependencies"
     case signature = "Code Signature"
     case cfg = "Control Flow Graphs"
+    case callGraph = "Call Graph"
     case memoryMap = "Memory Map"
     case pseudocode = "Pseudocode Generation"
+    case security = "Security Posture"
     case binaryPatching = "Binary Patching"
-    
+    case hexViewer = "Hex Viewer"
+    case addressConverter = "Address Converter"
+    case patternScan = "Pattern Scanner"
+    case inspection = "Binary Inspection"
+
     var icon: String {
         switch self {
         case .xrefs: return "arrow.triangle.branch"
@@ -23,12 +29,18 @@ enum AnalysisType: String, CaseIterable {
         case .dependencies: return "link"
         case .signature: return "checkmark.seal"
         case .cfg: return "point.3.connected.trianglepath.dotted"
+        case .callGraph: return "arrow.triangle.merge"
         case .memoryMap: return "square.stack.3d.up"
         case .pseudocode: return "doc.text.magnifyingglass"
+        case .security: return "shield.checkered"
         case .binaryPatching: return "bandage"
+        case .hexViewer: return "text.magnifyingglass"
+        case .addressConverter: return "arrow.left.arrow.right.circle"
+        case .patternScan: return "magnifyingglass"
+        case .inspection: return "checklist"
         }
     }
-    
+
     var description: String {
         switch self {
         case .xrefs: return "Function calls and references"
@@ -37,9 +49,15 @@ enum AnalysisType: String, CaseIterable {
         case .dependencies: return "Linked libraries with versions"
         case .signature: return "Code signing and entitlements"
         case .cfg: return "Visual control flow graphs"
+        case .callGraph: return "Function call relationships"
         case .memoryMap: return "Visual segment and section layout"
         case .pseudocode: return "High-level code reconstruction"
+        case .security: return "PIE, ARC, canaries, NX, dangerous APIs"
         case .binaryPatching: return "Apply and manage binary patches"
+        case .hexViewer: return "Raw binary hex viewer"
+        case .addressConverter: return "Convert between file offsets and VM addresses"
+        case .patternScan: return "Search for byte patterns"
+        case .inspection: return "Rule-based binary inspection"
         }
     }
 }
@@ -50,11 +68,13 @@ class AnalysisMenuViewController: UITableViewController {
 
     private let hasObjCData: Bool
     private let hasCodeSignature: Bool
+    private let hasSecurityPosture: Bool
     private let availableTypes: [AnalysisType]
 
-    init(hasObjCData: Bool = false, hasCodeSignature: Bool = false) {
+    init(hasObjCData: Bool = false, hasCodeSignature: Bool = false, hasSecurityPosture: Bool = false) {
         self.hasObjCData = hasObjCData
         self.hasCodeSignature = hasCodeSignature
+        self.hasSecurityPosture = hasSecurityPosture
 
         var types = [AnalysisType]()
         for type in AnalysisType.allCases {
@@ -63,6 +83,8 @@ class AnalysisMenuViewController: UITableViewController {
                 if hasObjCData { types.append(type) }
             case .signature:
                 if hasCodeSignature { types.append(type) }
+            case .security:
+                if hasSecurityPosture { types.append(type) }
             default:
                 types.append(type)
             }
@@ -171,6 +193,12 @@ class AnalysisMenuCell: UITableViewCell {
         titleLabel.text = type.rawValue
         descriptionLabel.text = type.description
         accessoryType = .disclosureIndicator
+
+        // Accessibility
+        isAccessibilityElement = true
+        accessibilityLabel = type.rawValue
+        accessibilityHint = type.description
+        accessibilityTraits = .button
     }
 }
 

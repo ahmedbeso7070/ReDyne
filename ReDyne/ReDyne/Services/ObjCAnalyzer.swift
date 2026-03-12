@@ -5,17 +5,13 @@ import Foundation
     // MARK: - Public Analysis Method
     
     @objc static func analyze(machOContext: OpaquePointer) -> ObjCAnalysisResult? {
-        print("Starting ObjC runtime analysis...")
-        let startTime = CFAbsoluteTimeGetCurrent()
         let ctx = UnsafeMutablePointer<MachOContext>(machOContext)
-        
+
         guard objc_has_runtime_data(ctx) else {
-            print("   No Objective-C runtime data found")
             return nil
         }
-        
+
         guard let runtimeInfo = objc_parse_runtime(ctx) else {
-            print("   Failed to parse ObjC runtime")
             return nil
         }
         
@@ -59,14 +55,7 @@ import Foundation
         }
         
         let result = ObjCAnalysisResult(classes: classes, categories: categories, protocols: protocols)
-        
-        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-        print("✅ ObjC analysis complete in \(String(format: "%.2f", elapsed))s")
-        print("   • \(result.totalClasses) classes (\(result.swiftClassCount) Swift, \(result.objcClassCount) ObjC)")
-        print("   • \(result.totalMethods) methods")
-        print("   • \(result.totalProperties) properties")
-        print("   • \(result.totalIvars) ivars")
-        
+
         return result
     }
     

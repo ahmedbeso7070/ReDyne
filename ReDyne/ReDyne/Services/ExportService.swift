@@ -102,28 +102,22 @@ class ExportService {
         
         if !output.strings.isEmpty {
             text += "───────────────────────────────────────────────────────────────\n"
-            text += "STRINGS (First 100 of \(output.strings.count))\n"
+            text += "STRINGS (\(output.strings.count))\n"
             text += "───────────────────────────────────────────────────────────────\n\n"
-            for (index, string) in output.strings.prefix(100).enumerated() {
-                text += "\(Constants.formatAddress(string.address))  [\(string.section)]  \(string.content.prefix(80))\n"
-                if index >= 99 && output.strings.count > 100 {
-                    text += "... and \(output.strings.count - 100) more strings\n"
-                }
+            for string in output.strings {
+                text += "\(Constants.formatAddress(string.address))  [\(string.section)]  \(string.content)\n"
             }
             text += "\n"
         }
         
         if !output.symbols.isEmpty {
             text += "───────────────────────────────────────────────────────────────\n"
-            text += "SYMBOLS (First 100 of \(output.symbols.count))\n"
+            text += "SYMBOLS (\(output.symbols.count))\n"
             text += "───────────────────────────────────────────────────────────────\n\n"
             let sortedSymbols = output.symbols.sortedByAddress()
-            for (index, symbol) in sortedSymbols.prefix(100).enumerated() {
+            for symbol in sortedSymbols {
                 let typeStr = symbol.type.padding(toLength: 10, withPad: " ", startingAt: 0)
                 text += "\(Constants.formatAddress(symbol.address))  \(typeStr)  \(symbol.name)\n"
-                if index >= 99 && sortedSymbols.count > 100 {
-                    text += "... and \(sortedSymbols.count - 100) more symbols\n"
-                }
             }
             text += "\n"
         }
@@ -222,7 +216,6 @@ class ExportService {
             let jsonData = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
             return jsonData
         } catch {
-            print("JSON export error: \(error)")
             return nil
         }
     }
@@ -515,7 +508,7 @@ class ExportService {
                     </div>
                     
                     <div class="section">
-                        <h2 class="section-title">🔤 Strings (First 50 of \(output.totalStrings))</h2>
+                        <h2 class="section-title">🔤 Strings (\(output.totalStrings))</h2>
                         <div class="table-container">
                             <table>
                                 <thead>
@@ -528,7 +521,7 @@ class ExportService {
                                 <tbody>
         """
         
-        for string in output.strings.prefix(50) {
+        for string in output.strings {
             let escapedContent = string.content
                 .replacingOccurrences(of: "<", with: "&lt;")
                 .replacingOccurrences(of: ">", with: "&gt;")

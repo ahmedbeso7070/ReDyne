@@ -89,10 +89,62 @@ import Combine
         )
     }
     
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        presentOnboardingIfNeeded()
+    }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         loadRecentFiles()
         updateInfoLabel()
+    }
+
+    // MARK: - Onboarding
+
+    private func presentOnboardingIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: Constants.UserDefaultsKeys.hasCompletedOnboarding) else { return }
+
+        let onboarding = OnboardingViewController()
+        onboarding.modalPresentationStyle = .fullScreen
+        onboarding.onComplete = { [weak self] trySample in
+            UserDefaults.standard.set(true, forKey: Constants.UserDefaultsKeys.hasCompletedOnboarding)
+            if trySample {
+                self?.openSampleBinary()
+            }
+        }
+        present(onboarding, animated: false)
+    }
+
+    private func openSampleBinary() {
+        // Look for a sample Mach-O binary in the app bundle
+        if let sampleURL = Bundle.main.url(forResource: "sample", withExtension: nil)
+            ?? Bundle.main.url(forResource: "sample", withExtension: "dylib")
+            ?? Bundle.main.url(forResource: "sample_binary", withExtension: nil) {
+
+            // Copy to a temp directory so we have write access
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent(Constants.File.tempDirectoryName, isDirectory: true)
+            try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+            let destination = tempDir.appendingPathComponent(sampleURL.lastPathComponent)
+            try? FileManager.default.removeItem(at: destination)
+
+            do {
+                try FileManager.default.copyItem(at: sampleURL, to: destination)
+                processFile(at: destination)
+            } catch {
+                ErrorHandler.showError(ReDyneError.invalidFile, in: self)
+            }
+        } else {
+            let alert = UIAlertController(
+                title: "Sample Binary Not Available",
+                message: "Sample binary not included in this build. Use the file picker to import a Mach-O binary.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+        }
     }
     
     private func updateInfoLabel() {

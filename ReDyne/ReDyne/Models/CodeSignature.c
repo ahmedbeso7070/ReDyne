@@ -55,8 +55,6 @@ bool codesign_is_signed(MachOContext *ctx) {
 CodeSignatureInfo* codesign_parse_signature(MachOContext *ctx) {
     if (!ctx) return NULL;
     
-    printf("Parsing code signature...\n");
-    
     CodeSignatureInfo *info = (CodeSignatureInfo*)calloc(1, sizeof(CodeSignatureInfo));
     if (!info) return NULL;
     
@@ -64,7 +62,6 @@ CodeSignatureInfo* codesign_parse_signature(MachOContext *ctx) {
     uint32_t sig_offset = find_code_signature_offset(ctx, &sig_size);
     
     if (sig_offset == 0 || sig_size == 0) {
-        printf("   No code signature found\n");
         info->is_signed = false;
         return info;
     }
@@ -72,18 +69,21 @@ CodeSignatureInfo* codesign_parse_signature(MachOContext *ctx) {
     info->is_signed = true;
     info->signature_size = sig_size;
     info->is_adhoc_signed = (sig_size < 4096);
-    
-    fseek(ctx->file, sig_offset, SEEK_SET);
-    
-    uint8_t *sig_data = (uint8_t*)malloc(sig_size);
-    if (!sig_data) {
-        printf("   Memory allocation failed\n");
+
+    if ((uint64_t)sig_offset + sig_size > (uint64_t)ctx->file_size) {
+        info->is_signed = false;
         return info;
     }
-    
+
+    fseek(ctx->file, sig_offset, SEEK_SET);
+
+    uint8_t *sig_data = (uint8_t*)malloc(sig_size);
+    if (!sig_data) {
+        return info;
+    }
+
     if (fread(sig_data, 1, sig_size, ctx->file) != sig_size) {
         free(sig_data);
-        printf("   Failed to read signature data\n");
         return info;
     }
     
@@ -102,24 +102,19 @@ CodeSignatureInfo* codesign_parse_signature(MachOContext *ctx) {
         blob_count = __builtin_bswap32(blob_count);
     } else {
         if (super_magic == 0xc00cdefa) {
-            printf("   Found alternative SuperBlob format (0xc00cdefa), attempting to parse...\n");
             // try reading as big endian (reverse the current logic)
             super_length = __builtin_bswap32(super_length);
             blob_count = __builtin_bswap32(blob_count);
-            printf("   Trying big-endian interpretation: length=0x%x, count=%u\n", super_length, blob_count);
         } else {
             free(sig_data);
-            printf("   Unknown SuperBlob magic: 0x%08x - signature may be in an unsupported format\n", super_magic);
             info->is_signed = false;
             return info;
         }
     }
     
     uint32_t index_offset = 12;
-    printf("   Found %u blobs in signature\n", blob_count);
 
     if (blob_count > 100 || blob_count == 0) {
-        printf("   Blob count %u seems unreasonable, signature may be corrupted or unsupported format\n", blob_count);
         if (sig_size > 0x8c) {
             uint32_t first_blob_offset = *(uint32_t*)(sig_data + 16);
             if (super_magic == 0xc00cdefa) {
@@ -129,10 +124,10 @@ CodeSignatureInfo* codesign_parse_signature(MachOContext *ctx) {
                 const char *ident = (const char*)(sig_data + first_blob_offset + 0x60);
                 if (ident[0] >= 32 && ident[0] <= 126) { // Looks like a valid string
                     strncpy(info->bundle_id, ident, sizeof(info->bundle_id) - 1);
-                    printf("   Extracted bundle ID from first blob: '%s'\n", info->bundle_id);
                 }
             }
         }
+        free(sig_data);
         goto finish_parsing;
     }
 
@@ -150,7 +145,6 @@ CodeSignatureInfo* codesign_parse_signature(MachOContext *ctx) {
         index_offset += 8;
 
         if (blob_offset >= sig_size) {
-            printf("   Skipping blob %u: offset out of bounds\n", i);
             continue;
         }
 
@@ -185,16 +179,11 @@ finish_parsing:
         strncpy(info->bundle_id, "(unknown)", sizeof(info->bundle_id) - 1);
     }
 
-    printf("   Signature found (%u bytes, %s)\n", sig_size,
-           info->is_adhoc_signed ? "ad-hoc" : "full");
-
     return info;
 }
 
 EntitlementsInfo* codesign_parse_entitlements(MachOContext *ctx) {
     if (!ctx) return NULL;
-    
-    printf("Parsing entitlements...\n");
     
     EntitlementsInfo *info = (EntitlementsInfo*)calloc(1, sizeof(EntitlementsInfo));
     if (!info) return NULL;
@@ -207,17 +196,23 @@ EntitlementsInfo* codesign_parse_entitlements(MachOContext *ctx) {
     uint32_t sig_offset = find_code_signature_offset(ctx, &sig_size);
     
     if (sig_offset == 0) {
-        printf("   No code signature found\n");
         return info;
     }
     
+    if ((uint64_t)sig_offset + sig_size > (uint64_t)ctx->file_size) {
+        return info;
+    }
+
     uint8_t *sig_data = (uint8_t*)malloc(sig_size);
     if (!sig_data) return info;
-    
+
     fseek(ctx->file, sig_offset, SEEK_SET);
-    fread(sig_data, 1, sig_size, ctx->file);
-    
-    for (uint32_t i = 0; i < sig_size - 8; i++) {
+    if (fread(sig_data, 1, sig_size, ctx->file) != sig_size) {
+        free(sig_data);
+        return info;
+    }
+
+    for (uint32_t i = 0; i + 8 <= sig_size; i++) {
         uint32_t magic = __builtin_bswap32(*(uint32_t*)(sig_data + i));
         if (magic == 0xfade7171) {
             uint32_t length = __builtin_bswap32(*(uint32_t*)(sig_data + i + 4));
@@ -233,17 +228,12 @@ EntitlementsInfo* codesign_parse_entitlements(MachOContext *ctx) {
                     info->xml_length = entitlements_len;
                 }
                 
-                printf("   Found entitlements (%zu bytes)\n", entitlements_len);
                 break;
             }
         }
     }
     
     free(sig_data);
-    
-    if (info->entitlement_count == 0 && !info->entitlements_xml) {
-        printf("   No entitlements found\n");
-    }
     
     return info;
 }

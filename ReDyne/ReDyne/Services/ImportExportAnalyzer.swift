@@ -5,10 +5,9 @@ import Foundation
     @objc static func analyze(machOContext: OpaquePointer) -> ImportExportAnalysis? {
         let ctx = UnsafeMutablePointer<MachOContext>(machOContext)
         
-        print("Analyzing imports and exports...")
         
         guard let importListPtr = dyld_parse_imports(ctx) else {
-            print("Failed to parse imports")
+
             return nil
         }
         defer { dyld_free_imports(importListPtr) }
@@ -25,10 +24,41 @@ import Foundation
             }
         }
         
-        print("Parsed \(imports.count) imports")
-        
+        // Also parse chained fixups for modern binaries (iOS 15+)
+        if ctx.pointee.has_chained_fixups {
+            if let chainedResult = chained_fixups_parse(ctx) {
+                let result = chainedResult.pointee
+                if result.fixup_count > 0, let fixups = result.fixups {
+                    for i in 0..<Int(result.fixup_count) {
+                        let fixup = fixups[i]
+                        if fixup.is_bind {
+                            let name = withUnsafePointer(to: fixup.symbol_name) {
+                                $0.withMemoryRebound(to: CChar.self, capacity: 256) { String(cString: $0) }
+                            }
+                            if !name.isEmpty {
+                                let symbol = ImportedSymbol(
+                                    name: name,
+                                    libraryName: "",
+                                    libraryOrdinal: Int(fixup.lib_ordinal),
+                                    address: fixup.address,
+                                    bindType: .pointer,
+                                    isWeak: fixup.is_weak,
+                                    addend: fixup.addend
+                                )
+                                // Only add if not already present from dyld_info parsing
+                                if !imports.contains(where: { $0.name == name && $0.address == fixup.address }) {
+                                    imports.append(symbol)
+                                }
+                            }
+                        }
+                    }
+                }
+                chained_fixups_free(chainedResult)
+            }
+        }
+
+
         guard let exportListPtr = dyld_parse_exports(ctx) else {
-            print("Failed to parse exports")
             return nil
         }
         defer { dyld_free_exports(exportListPtr) }
@@ -45,10 +75,8 @@ import Foundation
             }
         }
         
-        print("Parsed \(exports.count) exports")
         
         guard let libraryListPtr = dyld_parse_libraries(ctx) else {
-            print("Failed to parse libraries")
             return nil
         }
         defer { dyld_free_libraries(libraryListPtr) }
@@ -65,7 +93,6 @@ import Foundation
             }
         }
         
-        print("Parsed \(libraries.count) linked libraries")
         
         var dependencyLibraries: [LinkedLibrary] = []
         if libraryList.library_count > 0 {
@@ -95,11 +122,6 @@ import Foundation
             linkedLibraries: libraries,
             dependencyAnalysis: dependencyAnalysis
         )
-        
-        print("Import/Export analysis complete")
-        print("   • \(analysis.totalImports) imports")
-        print("   • \(analysis.totalExports) exports")
-        print("   • \(analysis.totalLibraries) linked libraries")
         
         return analysis
     }

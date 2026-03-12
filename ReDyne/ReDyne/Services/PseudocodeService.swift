@@ -127,15 +127,39 @@ public class PseudocodeService {
     ) -> Result<PseudocodeOutput, PseudocodeError> {
         
         guard let function = instructions.first(where: { instruction in
-            instruction.comment?.contains(symbolName) == true || 
+            instruction.comment?.contains(symbolName) == true ||
             instruction.fullDisassembly.contains(symbolName)
         }) else {
             return .failure(.parsingFailed("Symbol '\(symbolName)' not found in binary"))
         }
-        
-        // Extract function instructions (simplified: get 100 instructions from start)
+
+        // Extract function instructions using boundary detection
         let startIdx = instructions.firstIndex(where: { $0.address == function.address }) ?? 0
-        let endIdx = min(startIdx + 100, instructions.count)
+        let maxInstructions = 100000 // safety cap for very large functions
+        var endIdx = startIdx + 1
+
+        // Walk forward to find function end: look for RET, or the start of the next function
+        while endIdx < instructions.count && (endIdx - startIdx) < maxInstructions {
+            let inst = instructions[endIdx]
+
+            // If this instruction is marked as a function start (and it's not our start), stop
+            if inst.isFunctionStart && endIdx > startIdx {
+                break
+            }
+
+            // Check if previous instruction was a RET (function boundary)
+            let prev = instructions[endIdx - 1]
+            let prevMnemonic = prev.mnemonic.uppercased()
+            if prevMnemonic == "RET" || prevMnemonic == "RETAA" || prevMnemonic == "RETAB" {
+                // Check if current instruction looks like a new function (aligned or has symbol)
+                if inst.isFunctionStart || (inst.address % 16 == 0) {
+                    break
+                }
+            }
+
+            endIdx += 1
+        }
+
         let functionInstructions = Array(instructions[startIdx..<endIdx])
         
         var disassembly = ""

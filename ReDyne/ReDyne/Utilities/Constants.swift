@@ -10,10 +10,12 @@ enum Constants {
         static let maxFileSize: Int64 = 200 * 1024 * 1024
         static let allowedExtensions = ["dylib", "so", ""]
         static let tempDirectoryName = "ReDyneTempFiles"
+        static let patchSetsDirectoryName = "ReDynePatchSets"
+        static let savedBinariesDirectoryName = "ReDyneSavedBinaries"
     }
     
     // MARK: - UI Configuration
-    
+
     enum UI {
         static let defaultFontSize: CGFloat = 12
         static let titleFontSize: CGFloat = 17
@@ -23,6 +25,12 @@ enum Constants {
         static let standardSpacing: CGFloat = 16
         static let compactSpacing: CGFloat = 8
         static let animationDuration: TimeInterval = 0.3
+
+        // MARK: iPad Sidebar
+        static let sidebarWidth: CGFloat = 260
+        static let sidebarIconSize: CGFloat = 20
+        static let sidebarRowHeight: CGFloat = 48
+        static let sidebarFontSize: CGFloat = 15
     }
     
     // MARK: - Colors
@@ -47,7 +55,7 @@ enum Constants {
     
     enum Disassembly {
         static let defaultContextLines = 5
-        static let maxInstructionsDisplay = 10000
+        static let maxInstructionsDisplay = 100000
         static let instructionsPerPage = 100
     }
     
@@ -68,6 +76,7 @@ enum Constants {
         static let disassemblyDetailLevel = "com.jian.ReDyne.detailLevel"
         static let syntaxHighlightingEnabled = "com.jian.ReDyne.syntaxHighlight"
         static let useLegacyFilePicker = "com.jian.ReDyne.useLegacyFilePicker"
+        static let hasCompletedOnboarding = "com.jian.ReDyne.hasCompletedOnboarding"
     }
     
     // MARK: - Architecture Support
@@ -77,8 +86,16 @@ enum Constants {
         static let preferred = "ARM64"
     }
     
+    // MARK: - Dynamic Type Fonts
+
+    enum Fonts {
+        static let monoBody = UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular)
+        static let monoCaption = UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .regular)
+        static let monoHeadline = UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .headline).pointSize, weight: .medium)
+    }
+
     // MARK: - Processing
-    
+
     enum Processing {
         static let backgroundQueueLabel = "com.jian.ReDyne.backgroundQueue"
         static let maxConcurrentOperations = 1

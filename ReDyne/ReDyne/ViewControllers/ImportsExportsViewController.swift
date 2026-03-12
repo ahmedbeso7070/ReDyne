@@ -49,7 +49,8 @@ class ImportsExportsViewController: UIViewController {
     }()
     
     // MARK: - Properties
-    
+
+    weak var navigationDelegate: AnalysisNavigationDelegate?
     private let analysis: ImportExportAnalysis
     private var displayedImports: [ImportedSymbol] = []
     private var displayedExports: [ExportedSymbol] = []
@@ -251,6 +252,117 @@ extension ImportsExportsViewController: UITableViewDataSource {
 extension ImportsExportsViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
+
+        switch segmentedControl.selectedSegmentIndex {
+        case 0:
+            let importSym = displayedImports[indexPath.row]
+            showImportActions(importSym, at: indexPath)
+        case 1:
+            let exportSym = displayedExports[indexPath.row]
+            showExportActions(exportSym, at: indexPath)
+        case 2:
+            let library = displayedLibraries[indexPath.row]
+            showLibraryActions(library, at: indexPath)
+        default:
+            break
+        }
+    }
+
+    private func showImportActions(_ importSym: ImportedSymbol, at indexPath: IndexPath) {
+        let alert = UIAlertController(
+            title: importSym.displayName,
+            message: "Library: \(importSym.libraryName)\nAddress: \(String(format: "0x%llX", importSym.address))",
+            preferredStyle: .actionSheet
+        )
+
+        alert.addAction(UIAlertAction(title: "View in Disassembly", style: .default) { [weak self] _ in
+            self?.navigationDelegate?.navigateToDisassembly(atAddress: importSym.address)
+        })
+
+        alert.addAction(UIAlertAction(title: "View in Hex", style: .default) { [weak self] _ in
+            self?.navigationDelegate?.navigateToHexView(atOffset: importSym.address)
+        })
+
+        alert.addAction(UIAlertAction(title: "Find Symbol", style: .default) { [weak self] _ in
+            self?.navigationDelegate?.navigateToSymbol(named: importSym.name)
+        })
+
+        alert.addAction(UIAlertAction(title: "Copy Symbol Name", style: .default) { _ in
+            UIPasteboard.general.string = importSym.name
+        })
+
+        alert.addAction(UIAlertAction(title: "Copy Address", style: .default) { _ in
+            UIPasteboard.general.string = String(format: "0x%llX", importSym.address)
+        })
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        if let popover = alert.popoverPresentationController,
+           let cell = tableView.cellForRow(at: indexPath) {
+            popover.sourceView = cell
+            popover.sourceRect = cell.bounds
+        }
+
+        present(alert, animated: true)
+    }
+
+    private func showExportActions(_ exportSym: ExportedSymbol, at indexPath: IndexPath) {
+        let alert = UIAlertController(
+            title: exportSym.displayName,
+            message: "Address: \(String(format: "0x%llX", exportSym.address))\nType: \(exportSym.exportType)",
+            preferredStyle: .actionSheet
+        )
+
+        alert.addAction(UIAlertAction(title: "View in Disassembly", style: .default) { [weak self] _ in
+            self?.navigationDelegate?.navigateToDisassembly(atAddress: exportSym.address)
+        })
+
+        alert.addAction(UIAlertAction(title: "View in Hex", style: .default) { [weak self] _ in
+            self?.navigationDelegate?.navigateToHexView(atOffset: exportSym.address)
+        })
+
+        alert.addAction(UIAlertAction(title: "Find Symbol", style: .default) { [weak self] _ in
+            self?.navigationDelegate?.navigateToSymbol(named: exportSym.name)
+        })
+
+        alert.addAction(UIAlertAction(title: "Copy Symbol Name", style: .default) { _ in
+            UIPasteboard.general.string = exportSym.name
+        })
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        if let popover = alert.popoverPresentationController,
+           let cell = tableView.cellForRow(at: indexPath) {
+            popover.sourceView = cell
+            popover.sourceRect = cell.bounds
+        }
+
+        present(alert, animated: true)
+    }
+
+    private func showLibraryActions(_ library: String, at indexPath: IndexPath) {
+        let imports = analysis.imports(from: library)
+        let shortName = library.components(separatedBy: "/").last ?? library
+
+        let alert = UIAlertController(
+            title: shortName,
+            message: "\(library)\n\(imports.count) imports from this library",
+            preferredStyle: .actionSheet
+        )
+
+        alert.addAction(UIAlertAction(title: "Copy Library Path", style: .default) { _ in
+            UIPasteboard.general.string = library
+        })
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        if let popover = alert.popoverPresentationController,
+           let cell = tableView.cellForRow(at: indexPath) {
+            popover.sourceView = cell
+            popover.sourceRect = cell.bounds
+        }
+
+        present(alert, animated: true)
     }
     
     func tableView(_ tableView: UITableView, contextMenuConfigurationForRowAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {

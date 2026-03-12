@@ -119,7 +119,21 @@
     if (self.header.uuid) {
         [output appendFormat:@"UUID: %@\n", self.header.uuid];
     }
-    [output appendFormat:@"Encrypted: %@\n\n", self.header.isEncrypted ? @"Yes" : @"No"];
+    if (self.header.platformName) {
+        [output appendFormat:@"Platform: %@\n", self.header.platformName];
+    }
+    if (self.header.sourceVersion) {
+        [output appendFormat:@"Source Version: %@\n", self.header.sourceVersion];
+    }
+    if (self.header.flagsDescription) {
+        [output appendFormat:@"Flags: %@\n", self.header.flagsDescription];
+    }
+    [output appendFormat:@"PIE: %@\n", self.header.isPIE ? @"Yes" : @"No"];
+    [output appendFormat:@"Encrypted: %@\n", self.header.isEncrypted ? @"Yes" : @"No"];
+    if (self.header.hasEntryPoint) {
+        [output appendFormat:@"Entry Point: 0x%llx\n", self.header.entryPointAddress];
+    }
+    [output appendString:@"\n"];
     
     [output appendFormat:@"--- Segments (%lu) ---\n", (unsigned long)self.segments.count];
     for (SegmentModel *seg in self.segments) {
@@ -202,6 +216,16 @@
     [html appendFormat:@"<strong>Architecture:</strong> %@<br>\n", self.header.is64Bit ? @"64-bit" : @"32-bit"];
     [html appendFormat:@"<strong>Total Symbols:</strong> %lu<br>\n", (unsigned long)self.totalSymbols];
     [html appendFormat:@"<strong>Total Instructions:</strong> %lu<br>\n", (unsigned long)self.totalInstructions];
+    if (self.header.platformName) {
+        [html appendFormat:@"<strong>Platform:</strong> %@<br>\n", self.header.platformName];
+    }
+    [html appendFormat:@"<strong>PIE:</strong> %@<br>\n", self.header.isPIE ? @"Yes" : @"No"];
+    if (self.header.hasEntryPoint) {
+        [html appendFormat:@"<strong>Entry Point:</strong> 0x%llx<br>\n", self.header.entryPointAddress];
+    }
+    if (self.header.flagsDescription) {
+        [html appendFormat:@"<strong>Flags:</strong> %@<br>\n", self.header.flagsDescription];
+    }
     [html appendFormat:@"<strong>Processed:</strong> %@\n", self.processingDate];
     [html appendString:@"</div>\n"];
     

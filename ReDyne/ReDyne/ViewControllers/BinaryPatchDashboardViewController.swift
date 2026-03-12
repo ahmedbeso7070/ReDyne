@@ -215,7 +215,7 @@ class BinaryPatchDashboardViewController: UIViewController {
     
     private func updateStats() {
         let totalSets = patchSets.count
-        let totalPatches = patchSets.reduce(0) { $0 + $1.enabledPatchCount }
+        let totalPatches = patchSets.reduce(into: 0) { $0 += $1.enabledPatchCount }
         let readySets = patchSets.filter { $0.status == .ready }.count
         
         totalPatchSetsLabel.text = "\(totalSets) Sets"
@@ -434,7 +434,7 @@ extension BinaryPatchDashboardViewController: PatchTemplateDelegate {
     private func showTemplateInstructions(_ template: PatchTemplate, in viewController: UIViewController) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             let instructions = template.instructions.enumerated().map { index, instruction in
-                "\(instruction.step). \(instruction.title)\n   \(instruction.detail)"
+                "\(index + 1). \(instruction)"
             }.joined(separator: "\n\n")
             
             let alert = UIAlertController(
@@ -608,6 +608,16 @@ class PatchSetCell: UITableViewCell {
             statusLabel.text = "ARCHIVED"
             statusLabel.textColor = .white
             statusBadge.backgroundColor = .systemOrange
+        case .verified:
+            iconLabel.text = "✓"
+            statusLabel.text = "VERIFIED"
+            statusLabel.textColor = .white
+            statusBadge.backgroundColor = .systemGreen
+        case .failed:
+            iconLabel.text = "✗"
+            statusLabel.text = "FAILED"
+            statusLabel.textColor = .white
+            statusBadge.backgroundColor = .systemRed
         }
         
         let enabled = patchSet.enabledPatchCount

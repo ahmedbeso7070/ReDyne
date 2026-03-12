@@ -22,8 +22,8 @@ class MemoryMapView: UIView {
     
     weak var delegate: MemoryMapViewDelegate?
     
-    private let segments: [SegmentModel]
-    private let sections: [SectionModel]
+    private(set) var segments: [SegmentModel]
+    private(set) var sections: [SectionModel]
     private let fileSize: UInt64
     private let baseAddress: UInt64
     private var segmentRects: [(rect: CGRect, segment: SegmentModel)] = []
@@ -344,6 +344,14 @@ class MemoryMapView: UIView {
         }
     }
     
+    // MARK: - Update
+
+    func updateSegments(_ newSegments: [SegmentModel], sections newSections: [SectionModel]) {
+        self.segments = newSegments
+        self.sections = newSections
+        setNeedsDisplay()
+    }
+
     // MARK: - Interaction
     
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {

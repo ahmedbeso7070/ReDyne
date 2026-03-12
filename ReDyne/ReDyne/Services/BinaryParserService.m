@@ -22,11 +22,37 @@ typedef NS_ENUM(NSInteger, ReDyneBinaryParserError) {
                                  error:(NSError **)error {
     
     NSDate *startTime = [NSDate date];
-    
+
+    // Validate file path
+    if (!filePath || filePath.length == 0) {
+        if (error) {
+            *error = [NSError errorWithDomain:ReDyneBinaryParserErrorDomain
+                                         code:ReDyneBinaryParserErrorInvalidFile
+                                     userInfo:@{NSLocalizedDescriptionKey: @"File path is nil or empty"}];
+        }
+        return nil;
+    }
+
+    // Check file size before opening (500 MB limit)
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSDictionary *fileAttributes = [fileManager attributesOfItemAtPath:filePath error:nil];
+    if (fileAttributes) {
+        unsigned long long fileSize = [fileAttributes fileSize];
+        if (fileSize > 500ULL * 1024 * 1024) {
+            if (error) {
+                *error = [NSError errorWithDomain:ReDyneBinaryParserErrorDomain
+                                             code:ReDyneBinaryParserErrorTooLarge
+                                         userInfo:@{NSLocalizedDescriptionKey:
+                    [NSString stringWithFormat:@"File is too large (%llu bytes). Maximum supported size is 500 MB.", fileSize]}];
+            }
+            return nil;
+        }
+    }
+
     if (progressBlock) {
         progressBlock(@"Opening file...", 0.0);
     }
-    
+
     char error_msg[256] = {0};
     MachOContext *macho_ctx = macho_open([filePath UTF8String], error_msg);
     if (!macho_ctx) {
@@ -82,7 +108,10 @@ typedef NS_ENUM(NSInteger, ReDyneBinaryParserError) {
     
     macho_extract_segments(macho_ctx);
     macho_extract_sections(macho_ctx);
-    
+
+    // Resolve entry point (requires segments to be extracted first)
+    macho_resolve_entry_point(macho_ctx);
+
     DecompiledOutput *output = [[DecompiledOutput alloc] init];
     output.filePath = filePath;
     output.fileName = [filePath lastPathComponent];
@@ -136,11 +165,36 @@ typedef NS_ENUM(NSInteger, ReDyneBinaryParserError) {
     if (str_ctx) {
         for (uint32_t i = 0; i < macho_ctx->section_count; i++) {
             SectionInfo *sect = &macho_ctx->sections[i];
-            if (strcmp(sect->sectname, "__cstring") == 0) {
-                string_extract_cstrings(str_ctx, macho_ctx->file, sect->offset, sect->size, sect->addr);
+            if (strcmp(sect->sectname, "__cstring") == 0 ||
+                strcmp(sect->sectname, "__objc_methnames") == 0 ||
+                strcmp(sect->sectname, "__objc_classname") == 0 ||
+                strcmp(sect->sectname, "__objc_methtype") == 0) {
+                string_extract_cstrings(str_ctx, macho_ctx->file, sect->offset, sect->size, sect->addr, sect->sectname);
             }
         }
-        
+
+        /* Extract CFString literals from __cfstring sections */
+        for (uint32_t i = 0; i < macho_ctx->section_count; i++) {
+            SectionInfo *sect = &macho_ctx->sections[i];
+            if (strcmp(sect->sectname, "__cfstring") == 0) {
+                /* Find the __TEXT segment for VM-to-file-offset translation */
+                uint64_t text_vmaddr = 0;
+                uint64_t text_fileoff = 0;
+                for (uint32_t j = 0; j < macho_ctx->segment_count; j++) {
+                    if (strcmp(macho_ctx->segments[j].segname, "__TEXT") == 0) {
+                        text_vmaddr = macho_ctx->segments[j].vmaddr;
+                        text_fileoff = macho_ctx->segments[j].fileoff;
+                        break;
+                    }
+                }
+                string_extract_cfstrings(str_ctx, macho_ctx->file,
+                                         sect->offset, sect->size, sect->addr,
+                                         macho_ctx->header.is_64bit,
+                                         NULL, (size_t)macho_ctx->file_size,
+                                         text_vmaddr, text_fileoff);
+            }
+        }
+
         for (uint32_t i = 0; i < macho_ctx->segment_count; i++) {
             SegmentInfo *seg = &macho_ctx->segments[i];
             if ((seg->initprot & 0x01) && seg->filesize > 0) {
@@ -278,7 +332,39 @@ typedef NS_ENUM(NSInteger, ReDyneBinaryParserError) {
         }
         model.uuid = uuidStr;
     }
-    
+
+    // Populate new fields from enhanced MachOContext
+    model.rawFlags = ctx->header.flags;
+    model.isPIE = ctx->is_pie;
+    model.hasChainedFixups = ctx->has_chained_fixups;
+
+    // Flags description
+    char flagsBuf[1024];
+    macho_flags_description(ctx->header.flags, flagsBuf, sizeof(flagsBuf));
+    model.flagsDescription = [NSString stringWithUTF8String:flagsBuf];
+
+    // Platform name
+    if (ctx->platform > 0) {
+        model.platformName = [NSString stringWithUTF8String:macho_platform_string(ctx->platform)];
+    }
+
+    // Source version (A.B.C.D.E packed format)
+    if (ctx->has_source_version) {
+        uint64_t sv = ctx->source_version;
+        uint32_t a = (sv >> 40) & 0xFFFFFF;
+        uint32_t b = (sv >> 30) & 0x3FF;
+        uint32_t c = (sv >> 20) & 0x3FF;
+        uint32_t d = (sv >> 10) & 0x3FF;
+        uint32_t e = sv & 0x3FF;
+        model.sourceVersion = [NSString stringWithFormat:@"%u.%u.%u.%u.%u", a, b, c, d, e];
+    }
+
+    // Entry point
+    if (ctx->has_entry_point) {
+        model.hasEntryPoint = YES;
+        model.entryPointAddress = ctx->entry_point_address;
+    }
+
     return model;
 }
 
@@ -297,7 +383,9 @@ typedef NS_ENUM(NSInteger, ReDyneBinaryParserError) {
     if (info->initprot & 0x02) [prot appendString:@"w"];
     if (info->initprot & 0x04) [prot appendString:@"x"];
     model.protection = prot.length > 0 ? prot : @"---";
-    
+    model.initProt = info->initprot;
+    model.maxProt = info->maxprot;
+
     return model;
 }
 

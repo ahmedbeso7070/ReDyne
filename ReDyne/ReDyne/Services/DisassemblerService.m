@@ -53,14 +53,6 @@ typedef NS_ENUM(NSInteger, ReDyneDisassemblerError) {
     }
     
     if (!disasm_load_section(disasm_ctx, "__text")) {
-        NSLog(@"No __text section found. Available sections:");
-        for (uint32_t i = 0; i < macho_ctx->section_count; i++) {
-            NSLog(@"   • %s (segment: %s, size: %llu bytes)",
-                  macho_ctx->sections[i].sectname,
-                  macho_ctx->sections[i].segname,
-                  macho_ctx->sections[i].size);
-        }
-        
         disasm_free(disasm_ctx);
         macho_close(macho_ctx);
         if (error) {
@@ -76,11 +68,8 @@ typedef NS_ENUM(NSInteger, ReDyneDisassemblerError) {
     }
     
     uint32_t count = disasm_all(disasm_ctx);
-    NSLog(@"Disassembled %u instructions from __text section (size: %llu bytes)",
-          count, disasm_ctx->code_size);
-    
+
     if (count == 0) {
-        NSLog(@"Warning: No instructions disassembled (empty or data-only __text)");
         disasm_free(disasm_ctx);
         macho_close(macho_ctx);
         return @[];
@@ -140,13 +129,10 @@ typedef NS_ENUM(NSInteger, ReDyneDisassemblerError) {
     uint32_t count = disasm_range(disasm_ctx, startAddress, endAddress);
     
     if (count == 0) {
-        NSLog(@"Warning: No instructions in range 0x%llx-0x%llx", startAddress, endAddress);
         disasm_free(disasm_ctx);
         macho_close(macho_ctx);
         return @[];
     }
-    
-    NSLog(@"Disassembled %u instructions in range 0x%llx-0x%llx", count, startAddress, endAddress);
     
     NSMutableArray<InstructionModel *> *instructions = [NSMutableArray arrayWithCapacity:count];
     for (uint32_t i = 0; i < count; i++) {

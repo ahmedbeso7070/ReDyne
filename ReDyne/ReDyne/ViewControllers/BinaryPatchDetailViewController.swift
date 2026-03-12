@@ -348,6 +348,15 @@ class PatchCell: UITableViewCell {
         case .reverted:
             statusLabel.text = "Reverted"
             statusLabel.textColor = .systemOrange
+        case .pending:
+            statusLabel.text = "Pending"
+            statusLabel.textColor = .systemYellow
+        case .verified:
+            statusLabel.text = "Verified"
+            statusLabel.textColor = .systemGreen
+        case .failed:
+            statusLabel.text = "Failed"
+            statusLabel.textColor = .systemRed
         }
         
         addressLabel.text = "Address: 0x\(String(format: "%llX", patch.virtualAddress)) (offset: 0x\(String(format: "%llX", patch.fileOffset)))"

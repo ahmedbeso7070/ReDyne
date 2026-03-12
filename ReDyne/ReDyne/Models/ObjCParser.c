@@ -11,27 +11,30 @@ static bool is_valid_address(MachOContext *ctx, uint64_t addr) {
 
 static uint64_t read_ptr_at_offset(MachOContext *ctx, uint64_t file_offset) {
     if (!ctx || !ctx->file) return 0;
-    
+    if (file_offset + sizeof(uint64_t) > (uint64_t)ctx->file_size) return 0;
+
     uint64_t value = 0;
     fseek(ctx->file, file_offset, SEEK_SET);
-    fread(&value, sizeof(uint64_t), 1, ctx->file);
+    if (fread(&value, sizeof(uint64_t), 1, ctx->file) != 1) return 0;
     
     return ctx->header.is_swapped ? __builtin_bswap64(value) : value;
 }
 
 static uint32_t read_uint32_at_offset(MachOContext *ctx, uint64_t file_offset) {
     if (!ctx || !ctx->file) return 0;
-    
+    if (file_offset + sizeof(uint32_t) > (uint64_t)ctx->file_size) return 0;
+
     uint32_t value = 0;
     fseek(ctx->file, file_offset, SEEK_SET);
-    fread(&value, sizeof(uint32_t), 1, ctx->file);
+    if (fread(&value, sizeof(uint32_t), 1, ctx->file) != 1) return 0;
     
     return ctx->header.is_swapped ? __builtin_bswap32(value) : value;
 }
 
 static void read_string_at_offset(MachOContext *ctx, uint64_t file_offset, char *buffer, size_t max_len) {
     if (!ctx || !ctx->file || !buffer) return;
-    
+    if (file_offset >= (uint64_t)ctx->file_size) return;
+
     memset(buffer, 0, max_len);
     fseek(ctx->file, file_offset, SEEK_SET);
     
@@ -51,10 +54,12 @@ static uint64_t vm_addr_to_file_offset(MachOContext *ctx, uint64_t vm_addr) {
         SegmentInfo *seg = &ctx->segments[i];
         if (vm_addr >= seg->vmaddr && vm_addr < seg->vmaddr + seg->vmsize) {
             uint64_t offset_in_segment = vm_addr - seg->vmaddr;
-            return seg->fileoff + offset_in_segment;
+            uint64_t result = seg->fileoff + offset_in_segment;
+            if (result >= (uint64_t)ctx->file_size) return 0;
+            return result;
         }
     }
-    
+
     return 0;
 }
 
@@ -126,7 +131,7 @@ static uint32_t parse_protocol_list(MachOContext *ctx, uint64_t protocol_list_ad
         
         objc_protocol_64_t protocol;
         fseek(ctx->file, protocol_offset, SEEK_SET);
-        fread(&protocol, sizeof(objc_protocol_64_t), 1, ctx->file);
+        if (fread(&protocol, sizeof(objc_protocol_64_t), 1, ctx->file) != 1) continue;
         
         if (ctx->header.is_swapped) {
             protocol.name_ptr = __builtin_bswap64(protocol.name_ptr);
@@ -167,7 +172,12 @@ static int parse_method_list(MachOContext *ctx, uint64_t method_list_vm_addr, Ob
         *methods_out = NULL;
         return 0;
     }
-    
+
+    if (file_offset + 8 + (uint64_t)count * sizeof(objc_method_64_t) > (uint64_t)ctx->file_size) {
+        *methods_out = NULL;
+        return 0;
+    }
+
     ObjCMethodInfo *methods = calloc(count, sizeof(ObjCMethodInfo));
     if (!methods) {
         *methods_out = NULL;
@@ -178,7 +188,7 @@ static int parse_method_list(MachOContext *ctx, uint64_t method_list_vm_addr, Ob
     for (uint32_t i = 0; i < count; i++) {
         objc_method_64_t method;
         fseek(ctx->file, method_offset, SEEK_SET);
-        fread(&method, sizeof(objc_method_64_t), 1, ctx->file);
+        if (fread(&method, sizeof(objc_method_64_t), 1, ctx->file) != 1) break;
         
         if (ctx->header.is_swapped) {
             method.name_ptr = __builtin_bswap64(method.name_ptr);
@@ -242,7 +252,7 @@ static int parse_property_list(MachOContext *ctx, uint64_t property_list_vm_addr
     for (uint32_t i = 0; i < count; i++) {
         objc_property_64_t property;
         fseek(ctx->file, property_offset, SEEK_SET);
-        fread(&property, sizeof(objc_property_64_t), 1, ctx->file);
+        if (fread(&property, sizeof(objc_property_64_t), 1, ctx->file) != 1) break;
         
         if (ctx->header.is_swapped) {
             property.name_ptr = __builtin_bswap64(property.name_ptr);
@@ -302,7 +312,7 @@ static int parse_ivar_list(MachOContext *ctx, uint64_t ivar_list_vm_addr, ObjCIv
     for (uint32_t i = 0; i < count; i++) {
         objc_ivar_64_t ivar;
         fseek(ctx->file, ivar_offset, SEEK_SET);
-        fread(&ivar, sizeof(objc_ivar_64_t), 1, ctx->file);
+        if (fread(&ivar, sizeof(objc_ivar_64_t), 1, ctx->file) != 1) break;
         
         if (ctx->header.is_swapped) {
             ivar.offset_ptr = __builtin_bswap64(ivar.offset_ptr);
@@ -350,7 +360,7 @@ static bool parse_category(MachOContext *ctx, uint64_t cat_vm_addr, ObjCCategory
     
     objc_category_64_t cat_struct;
     fseek(ctx->file, cat_file_offset, SEEK_SET);
-    fread(&cat_struct, sizeof(objc_category_64_t), 1, ctx->file);
+    if (fread(&cat_struct, sizeof(objc_category_64_t), 1, ctx->file) != 1) return false;
     
     if (ctx->header.is_swapped) {
         cat_struct.name_ptr = __builtin_bswap64(cat_struct.name_ptr);
@@ -375,31 +385,33 @@ static bool parse_category(MachOContext *ctx, uint64_t cat_vm_addr, ObjCCategory
         if (class_file_offset > 0) {
             objc_class_64_t class_struct;
             fseek(ctx->file, class_file_offset, SEEK_SET);
-            fread(&class_struct, sizeof(objc_class_64_t), 1, ctx->file);
-            
+            if (fread(&class_struct, sizeof(objc_class_64_t), 1, ctx->file) == 1) {
+
             if (ctx->header.is_swapped) {
                 class_struct.data_ptr = __builtin_bswap64(class_struct.data_ptr);
             }
-            
+
             uint64_t ro_vm_addr = class_struct.data_ptr & ~0x7ULL;
             if (is_valid_address(ctx, ro_vm_addr)) {
                 uint64_t ro_file_offset = vm_addr_to_file_offset(ctx, ro_vm_addr);
                 if (ro_file_offset > 0) {
                     objc_class_ro_64_t ro;
                     fseek(ctx->file, ro_file_offset, SEEK_SET);
-                    fread(&ro, sizeof(objc_class_ro_64_t), 1, ctx->file);
-                    
-                    if (ctx->header.is_swapped) {
-                        ro.name_ptr = __builtin_bswap64(ro.name_ptr);
-                    }
-                    
-                    if (is_valid_address(ctx, ro.name_ptr)) {
-                        uint64_t class_name_offset = vm_addr_to_file_offset(ctx, ro.name_ptr);
-                        if (class_name_offset > 0) {
-                            read_string_at_offset(ctx, class_name_offset, cat_info->class_name, sizeof(cat_info->class_name));
+                    if (fread(&ro, sizeof(objc_class_ro_64_t), 1, ctx->file) == 1) {
+
+                        if (ctx->header.is_swapped) {
+                            ro.name_ptr = __builtin_bswap64(ro.name_ptr);
+                        }
+
+                        if (is_valid_address(ctx, ro.name_ptr)) {
+                            uint64_t class_name_offset = vm_addr_to_file_offset(ctx, ro.name_ptr);
+                            if (class_name_offset > 0) {
+                                read_string_at_offset(ctx, class_name_offset, cat_info->class_name, sizeof(cat_info->class_name));
+                            }
                         }
                     }
                 }
+            }
             }
         }
     }
@@ -449,14 +461,14 @@ static bool parse_class(MachOContext *ctx, uint64_t class_vm_addr, ObjCClassInfo
     
     objc_class_64_t class_struct;
     fseek(ctx->file, class_file_offset, SEEK_SET);
-    fread(&class_struct, sizeof(objc_class_64_t), 1, ctx->file);
-    
+    if (fread(&class_struct, sizeof(objc_class_64_t), 1, ctx->file) != 1) return false;
+
     if (ctx->header.is_swapped) {
         class_struct.isa = __builtin_bswap64(class_struct.isa);
         class_struct.superclass = __builtin_bswap64(class_struct.superclass);
         class_struct.data_ptr = __builtin_bswap64(class_struct.data_ptr);
     }
-    
+
     class_info->address = class_vm_addr;
     
     if (!is_valid_address(ctx, class_struct.data_ptr)) return false;
@@ -467,8 +479,8 @@ static bool parse_class(MachOContext *ctx, uint64_t class_vm_addr, ObjCClassInfo
     
     objc_class_ro_64_t ro;
     fseek(ctx->file, ro_file_offset, SEEK_SET);
-    fread(&ro, sizeof(objc_class_ro_64_t), 1, ctx->file);
-    
+    if (fread(&ro, sizeof(objc_class_ro_64_t), 1, ctx->file) != 1) return false;
+
     if (ctx->header.is_swapped) {
         ro.flags = __builtin_bswap32(ro.flags);
         ro.name_ptr = __builtin_bswap64(ro.name_ptr);
@@ -491,7 +503,7 @@ static bool parse_class(MachOContext *ctx, uint64_t class_vm_addr, ObjCClassInfo
         if (super_file_offset > 0) {
             objc_class_64_t super_class;
             fseek(ctx->file, super_file_offset, SEEK_SET);
-            fread(&super_class, sizeof(objc_class_64_t), 1, ctx->file);
+            if (fread(&super_class, sizeof(objc_class_64_t), 1, ctx->file) != 1) goto done_super;
             
             if (ctx->header.is_swapped) {
                 super_class.data_ptr = __builtin_bswap64(super_class.data_ptr);
@@ -502,8 +514,8 @@ static bool parse_class(MachOContext *ctx, uint64_t class_vm_addr, ObjCClassInfo
             if (super_ro_offset > 0) {
                 objc_class_ro_64_t super_ro;
                 fseek(ctx->file, super_ro_offset, SEEK_SET);
-                fread(&super_ro, sizeof(objc_class_ro_64_t), 1, ctx->file);
-                
+                if (fread(&super_ro, sizeof(objc_class_ro_64_t), 1, ctx->file) != 1) goto done_super;
+
                 if (ctx->header.is_swapped) {
                     super_ro.name_ptr = __builtin_bswap64(super_ro.name_ptr);
                 }
@@ -517,7 +529,8 @@ static bool parse_class(MachOContext *ctx, uint64_t class_vm_addr, ObjCClassInfo
             }
         }
     }
-    
+done_super:
+
     class_info->instance_method_count = parse_method_list(ctx, ro.baseMethods_ptr, &class_info->instance_methods, false);
     class_info->property_count = parse_property_list(ctx, ro.baseProperties_ptr, &class_info->properties);
     class_info->ivar_count = parse_ivar_list(ctx, ro.ivars_ptr, &class_info->ivars);
@@ -528,24 +541,26 @@ static bool parse_class(MachOContext *ctx, uint64_t class_vm_addr, ObjCClassInfo
         if (metaclass_file_offset > 0) {
             objc_class_64_t metaclass;
             fseek(ctx->file, metaclass_file_offset, SEEK_SET);
-            fread(&metaclass, sizeof(objc_class_64_t), 1, ctx->file);
-            
+            if (fread(&metaclass, sizeof(objc_class_64_t), 1, ctx->file) == 1) {
+
             if (ctx->header.is_swapped) {
                 metaclass.data_ptr = __builtin_bswap64(metaclass.data_ptr);
             }
-            
+
             uint64_t meta_ro_addr = metaclass.data_ptr & ~0x7ULL;
             uint64_t meta_ro_offset = vm_addr_to_file_offset(ctx, meta_ro_addr);
             if (meta_ro_offset > 0) {
                 objc_class_ro_64_t meta_ro;
                 fseek(ctx->file, meta_ro_offset, SEEK_SET);
-                fread(&meta_ro, sizeof(objc_class_ro_64_t), 1, ctx->file);
-                
-                if (ctx->header.is_swapped) {
-                    meta_ro.baseMethods_ptr = __builtin_bswap64(meta_ro.baseMethods_ptr);
+                if (fread(&meta_ro, sizeof(objc_class_ro_64_t), 1, ctx->file) == 1) {
+
+                    if (ctx->header.is_swapped) {
+                        meta_ro.baseMethods_ptr = __builtin_bswap64(meta_ro.baseMethods_ptr);
+                    }
+
+                    class_info->class_method_count = parse_method_list(ctx, meta_ro.baseMethods_ptr, &class_info->class_methods, true);
                 }
-                
-                class_info->class_method_count = parse_method_list(ctx, meta_ro.baseMethods_ptr, &class_info->class_methods, true);
+            }
             }
         }
     }
@@ -576,22 +591,18 @@ ObjCRuntimeInfo* objc_parse_runtime(MachOContext *ctx) {
         return NULL;
     }
     
-    printf("Parsing Objective-C runtime...\n");
-    
     SectionInfo *classlist = find_section(ctx, "__DATA", "__objc_classlist");
     if (!classlist) {
         classlist = find_section(ctx, "__DATA_CONST", "__objc_classlist");
     }
     
     if (!classlist) {
-        printf("   No __objc_classlist section found\n");
         return NULL;
     }
     
     int class_count = (int)(classlist->size / sizeof(uint64_t));
-    printf("   Found %d classes\n", class_count);
-    
-    if (class_count == 0 || class_count > 10000) {
+
+    if (class_count == 0 || class_count > 100000) {
         return NULL;
     }
     
@@ -629,8 +640,6 @@ ObjCRuntimeInfo* objc_parse_runtime(MachOContext *ctx) {
     if (cat_sect && cat_sect->size > 0) {
         int cat_count = (int)(cat_sect->size / sizeof(uint64_t));
         if (cat_count > 0 && cat_count < 10000) {
-            printf("   Found %d categories\n", cat_count);
-            
             runtime->categories = calloc(cat_count, sizeof(ObjCCategoryInfo));
             if (runtime->categories) {
                 int parsed_cat_count = 0;
@@ -647,16 +656,13 @@ ObjCRuntimeInfo* objc_parse_runtime(MachOContext *ctx) {
                 }
                 
                 runtime->category_count = parsed_cat_count;
-                printf("   ✅ Successfully parsed %d categories\n", parsed_cat_count);
             }
         }
     }
     
     runtime->protocol_count = 0;
     runtime->protocols = NULL;
-    
-    printf("   ✅ Successfully parsed %d classes\n", parsed_count);
-    
+
     return runtime;
 }
 

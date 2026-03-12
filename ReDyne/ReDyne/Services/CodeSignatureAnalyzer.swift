@@ -5,10 +5,7 @@ import Foundation
     @objc static func analyze(machOContext: OpaquePointer) -> CodeSigningAnalysis? {
         let ctx = UnsafeMutablePointer<MachOContext>(machOContext)
         
-        print("Analyzing code signature...")
-        
         guard let sigInfoPtr = codesign_parse_signature(ctx) else {
-            print("Failed to parse signature")
             return nil
         }
         defer { codesign_free_signature(sigInfoPtr) }
@@ -43,14 +40,7 @@ import Foundation
         )
         
         let analysis = CodeSigningAnalysis(signingInfo: signingInfo)
-        
-        print("Code signature analysis complete")
-        print("   • Signed: \(sigInfo.is_signed ? "Yes" : "No")")
-        if sigInfo.is_signed {
-            print("   • Type: \(sigInfo.is_adhoc_signed ? "Ad-hoc" : "Full")")
-            print("   • Entitlements: \(sigInfo.has_entitlements ? "Yes" : "No")")
-        }
-        
+
         return analysis
     }
 }

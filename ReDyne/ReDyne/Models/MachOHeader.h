@@ -11,11 +11,23 @@
 #pragma mark - Constants
 
 #define MAX_FILE_SIZE (200 * 1024 * 1024)
+#define MAX_LOAD_COMMANDS 10000
+#define MAX_SEGMENTS 256
+#define MAX_SECTIONS 4096
+#define MAX_PARSE_WARNINGS 64
+#define MAX_WARNING_LENGTH 256
+#define MAX_RPATHS 64
 #define PREFERRED_ARCH_ARM64E CPU_TYPE_ARM64
 #define PREFERRED_ARCH_ARM64 CPU_TYPE_ARM64
 #define PREFERRED_ARCH_X86_64 CPU_TYPE_X86_64
 
 #pragma mark - Structures
+
+typedef struct {
+    char message[MAX_WARNING_LENGTH];
+    uint32_t offset;     // file offset where issue was found
+    uint32_t severity;   // 0=info, 1=warning, 2=error
+} ParseWarning;
 
 typedef struct {
     uint32_t magic;
@@ -93,7 +105,59 @@ typedef struct {
     bool has_uuid;
     uint32_t min_version;
     uint32_t sdk_version;
-    
+
+    // Parse warnings
+    ParseWarning warnings[MAX_PARSE_WARNINGS];
+    uint32_t warning_count;
+
+    // Entry point
+    bool has_entry_point;
+    uint64_t entry_point_offset;  // from LC_MAIN
+    uint64_t entry_point_address; // resolved VA
+
+    // Function starts
+    bool has_function_starts;
+    uint32_t function_starts_offset;
+    uint32_t function_starts_size;
+
+    // Data in code
+    bool has_data_in_code;
+    uint32_t data_in_code_offset;
+    uint32_t data_in_code_size;
+
+    // Chained fixups (modern iOS 15+ binaries)
+    bool has_chained_fixups;
+    uint32_t chained_fixups_offset;
+    uint32_t chained_fixups_size;
+
+    // Exports trie (new style, separate from LC_DYLD_INFO)
+    bool has_exports_trie;
+    uint32_t exports_trie_offset;
+    uint32_t exports_trie_size;
+
+    // Build version info
+    uint32_t platform;
+    uint32_t minos;
+    uint32_t sdk;
+    uint32_t build_tool_count;
+
+    // Source version
+    uint64_t source_version;
+    bool has_source_version;
+
+    // Security-relevant flags
+    bool is_pie;
+    bool has_restrict_segment;
+    bool allows_stack_execution;
+    bool no_heap_execution;
+
+    // RPaths
+    char *rpaths[MAX_RPATHS];
+    uint32_t rpath_count;
+
+    // Linker option strings
+    uint32_t linker_option_count;
+
 } MachOContext;
 
 #pragma mark - Function Declarations
@@ -123,6 +187,13 @@ const char* macho_cpu_subtype_string(uint32_t cputype, uint32_t cpusubtype);
 const char* macho_filetype_string(uint32_t filetype);
 
 void macho_close(MachOContext *ctx);
+
+void macho_add_warning(MachOContext *ctx, const char *message, uint32_t offset, uint32_t severity);
+bool macho_validate_load_commands(MachOContext *ctx);
+bool macho_resolve_entry_point(MachOContext *ctx);
+const char* macho_flags_description(uint32_t flags, char *buffer, size_t bufsize);
+const char* macho_platform_string(uint32_t platform);
+const char* macho_load_command_name(uint32_t cmd);
 
 uint16_t swap_uint16(uint16_t val);
 uint32_t swap_uint32(uint32_t val);

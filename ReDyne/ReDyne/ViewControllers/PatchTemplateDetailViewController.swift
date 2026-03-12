@@ -94,8 +94,8 @@ class PatchTemplateDetailViewController: UIViewController {
             ])
             lastView = instrTitle
             
-            for instruction in template.instructions {
-                let stepCard = createStepCard(instruction)
+            for (index, instruction) in template.instructions.enumerated() {
+                let stepCard = createStepCard(step: index + 1, text: instruction)
                 contentView.addSubview(stepCard)
                 NSLayoutConstraint.activate([
                     stepCard.topAnchor.constraint(equalTo: lastView!.bottomAnchor, constant: 12),
@@ -168,6 +168,9 @@ class PatchTemplateDetailViewController: UIViewController {
         case .advanced:
             difficultyLabel.backgroundColor = .systemRed.withAlphaComponent(0.2)
             difficultyLabel.textColor = .systemRed
+        case .expert:
+            difficultyLabel.backgroundColor = .systemPurple.withAlphaComponent(0.2)
+            difficultyLabel.textColor = .systemPurple
         }
         
         card.addSubview(iconView)
@@ -211,7 +214,7 @@ class PatchTemplateDetailViewController: UIViewController {
         return label
     }
     
-    private func createStepCard(_ instruction: TemplateInstruction) -> UIView {
+    private func createStepCard(step: Int, text: String) -> UIView {
         let card = UIView()
         card.translatesAutoresizingMaskIntoConstraints = false
         card.backgroundColor = Constants.Colors.secondaryBackground
@@ -219,72 +222,33 @@ class PatchTemplateDetailViewController: UIViewController {
         
         let stepBadge = UILabel()
         stepBadge.translatesAutoresizingMaskIntoConstraints = false
-        stepBadge.text = "\(instruction.step)"
+        stepBadge.text = "\(step)"
         stepBadge.font = .systemFont(ofSize: 16, weight: .bold)
         stepBadge.textColor = .white
         stepBadge.backgroundColor = Constants.Colors.accentColor
         stepBadge.textAlignment = .center
         stepBadge.layer.cornerRadius = 15
         stepBadge.layer.masksToBounds = true
-        
+
         let titleLabel = UILabel()
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.text = instruction.title
+        titleLabel.text = text
         titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
         titleLabel.numberOfLines = 0
         
-        let detailLabel = UILabel()
-        detailLabel.translatesAutoresizingMaskIntoConstraints = false
-        detailLabel.text = instruction.detail
-        detailLabel.font = .systemFont(ofSize: 15)
-        detailLabel.textColor = .secondaryLabel
-        detailLabel.numberOfLines = 0
-        
         card.addSubview(stepBadge)
         card.addSubview(titleLabel)
-        card.addSubview(detailLabel)
-        
-        var lastView: UIView = detailLabel
-        
+
         NSLayoutConstraint.activate([
             stepBadge.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
             stepBadge.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
             stepBadge.widthAnchor.constraint(equalToConstant: 30),
             stepBadge.heightAnchor.constraint(equalToConstant: 30),
-            
+
             titleLabel.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
             titleLabel.leadingAnchor.constraint(equalTo: stepBadge.trailingAnchor, constant: 12),
             titleLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
-            
-            detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 6),
-            detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            detailLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12)
-        ])
-        
-        if let pattern = instruction.arm64Pattern {
-            let patternView = createCodeBlock(title: "ARM64 Pattern", code: pattern)
-            card.addSubview(patternView)
-            NSLayoutConstraint.activate([
-                patternView.topAnchor.constraint(equalTo: lastView.bottomAnchor, constant: 10),
-                patternView.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-                patternView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12)
-            ])
-            lastView = patternView
-        }
-        
-        if let example = instruction.example {
-            let exampleView = createCodeBlock(title: "Example", code: example)
-            card.addSubview(exampleView)
-            NSLayoutConstraint.activate([
-                exampleView.topAnchor.constraint(equalTo: lastView.bottomAnchor, constant: 10),
-                exampleView.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-                exampleView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12)
-            ])
-            lastView = exampleView
-        }
-        
-        NSLayoutConstraint.activate([
-            lastView.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12)
+            titleLabel.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12)
         ])
         
         return card

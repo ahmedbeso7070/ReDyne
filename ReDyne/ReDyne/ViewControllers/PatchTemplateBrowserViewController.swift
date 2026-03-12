@@ -266,10 +266,13 @@ class TemplateCell: UITableViewCell {
         case .advanced:
             difficultyLabel.backgroundColor = .systemRed.withAlphaComponent(0.2)
             difficultyLabel.textColor = .systemRed
+        case .expert:
+            difficultyLabel.backgroundColor = .systemPurple.withAlphaComponent(0.2)
+            difficultyLabel.textColor = .systemPurple
         }
-        
+
         if !template.tags.isEmpty {
-            tagsLabel.text = "🏷 " + template.tags.map { "#\($0)" }.joined(separator: " ")
+            tagsLabel.text = template.tags.map { "#\($0)" }.joined(separator: " ")
         } else {
             tagsLabel.text = ""
         }

@@ -8,22 +8,26 @@
 
 #pragma mark - Helper Functions
 
-bool is_printable(char c) {
+bool redyne_is_printable(char c) {
     return (c >= 0x20 && c <= 0x7E) || c == '\t' || c == '\n' || c == '\r';
 }
 
-static void string_context_resize(StringContext *ctx) {
-    ctx->capacity *= 2;
-    ctx->strings = realloc(ctx->strings, ctx->capacity * sizeof(StringInfo));
+static bool string_context_resize(StringContext *ctx) {
+    uint32_t new_capacity = ctx->capacity * 2;
+    void *new_ptr = realloc(ctx->strings, new_capacity * sizeof(StringInfo));
+    if (!new_ptr) return false;
+    ctx->strings = new_ptr;
+    ctx->capacity = new_capacity;
+    return true;
 }
 
 static void add_string(StringContext *ctx, uint64_t address, uint64_t offset, 
                       const char *content, uint32_t length, const char *section_name,
                       bool is_cstring) {
     if (ctx->count >= ctx->capacity) {
-        string_context_resize(ctx);
+        if (!string_context_resize(ctx)) return;
     }
-    
+
     StringInfo *info = &ctx->strings[ctx->count++];
     info->address = address;
     info->offset = offset;
@@ -32,6 +36,10 @@ static void add_string(StringContext *ctx, uint64_t address, uint64_t offset,
     info->is_unicode = false;
     
     info->content = malloc(length + 1);
+    if (!info->content) {
+        ctx->count--;
+        return;
+    }
     memcpy(info->content, content, length);
     info->content[length] = '\0';
     
@@ -71,7 +79,7 @@ uint32_t string_extract_from_data(StringContext *ctx, const uint8_t *data, size_
     for (size_t i = 0; i < size; i++) {
         uint8_t byte = data[i];
         
-        if (is_printable((char)byte)) {
+        if (redyne_is_printable((char)byte)) {
             if (buf_pos == 0) {
                 string_start = i;
             }
@@ -96,8 +104,10 @@ uint32_t string_extract_from_data(StringContext *ctx, const uint8_t *data, size_
 }
 
 uint32_t string_extract_cstrings(StringContext *ctx, FILE *file, uint64_t offset,
-                                  uint64_t size, uint64_t vmaddr) {
+                                  uint64_t size, uint64_t vmaddr,
+                                  const char *section_name) {
     if (!ctx || !file || size == 0) return 0;
+    const char *sect_name = section_name ? section_name : "__cstring";
     
     uint8_t *data = malloc(size);
     if (!data) return 0;
@@ -118,20 +128,104 @@ uint32_t string_extract_cstrings(StringContext *ctx, FILE *file, uint64_t offset
         if (len >= MIN_STRING_LENGTH && len < MAX_STRING_LENGTH) {
             bool all_printable = true;
             for (size_t i = 0; i < len; i++) {
-                if (!is_printable(str[i])) {
+                if (!redyne_is_printable(str[i])) {
                     all_printable = false;
                     break;
                 }
             }
             
             if (all_printable) {
-                add_string(ctx, vmaddr + pos, offset + pos, str, len, "__cstring", true);
+                add_string(ctx, vmaddr + pos, offset + pos, str, (uint32_t)len, sect_name, true);
                 found++;
             }
         }
         pos += len + 1;
     }
     
+    free(data);
+    return found;
+}
+
+uint32_t string_extract_cfstrings(StringContext *ctx, FILE *file,
+                                   uint64_t section_offset, uint64_t section_size,
+                                   uint64_t section_vmaddr, bool is_64bit,
+                                   const uint8_t *file_data, size_t file_data_size,
+                                   uint64_t text_segment_vmaddr, uint64_t text_segment_fileoff) {
+    if (!ctx || !file || section_size == 0) return 0;
+
+    /* CFString struct layout:
+     * 64-bit: { uint64_t isa, uint64_t flags, uint64_t str_ptr, uint64_t length } = 32 bytes
+     * 32-bit: { uint32_t isa, uint32_t flags, uint32_t str_ptr, uint32_t length } = 16 bytes
+     */
+    size_t entry_size = is_64bit ? 32 : 16;
+
+    if (section_size % entry_size != 0) return 0;
+
+    uint8_t *data = malloc(section_size);
+    if (!data) return 0;
+
+    fseek(file, section_offset, SEEK_SET);
+    if (fread(data, 1, section_size, file) != section_size) {
+        free(data);
+        return 0;
+    }
+
+    uint32_t found = 0;
+    uint64_t num_entries = section_size / entry_size;
+
+    for (uint64_t i = 0; i < num_entries; i++) {
+        uint8_t *entry = data + (i * entry_size);
+        uint64_t str_ptr;
+        uint64_t str_len;
+
+        if (is_64bit) {
+            memcpy(&str_ptr, entry + 16, sizeof(uint64_t));
+            memcpy(&str_len, entry + 24, sizeof(uint64_t));
+        } else {
+            uint32_t ptr32, len32;
+            memcpy(&ptr32, entry + 8, sizeof(uint32_t));
+            memcpy(&len32, entry + 12, sizeof(uint32_t));
+            str_ptr = ptr32;
+            str_len = len32;
+        }
+
+        if (str_len == 0 || str_len >= MAX_STRING_LENGTH) continue;
+
+        /* Convert VM address to file offset */
+        uint64_t str_file_offset = str_ptr - text_segment_vmaddr + text_segment_fileoff;
+
+        if (str_file_offset >= file_data_size) continue;
+        if (str_file_offset + str_len > file_data_size) continue;
+
+        char *buf = malloc(str_len + 1);
+        if (!buf) continue;
+
+        fseek(file, str_file_offset, SEEK_SET);
+        if (fread(buf, 1, str_len, file) != str_len) {
+            free(buf);
+            continue;
+        }
+        buf[str_len] = '\0';
+
+        /* Verify all characters are printable */
+        bool all_printable = true;
+        for (uint64_t j = 0; j < str_len; j++) {
+            if (!redyne_is_printable(buf[j])) {
+                all_printable = false;
+                break;
+            }
+        }
+
+        if (all_printable && str_len >= MIN_STRING_LENGTH) {
+            uint64_t entry_vmaddr = section_vmaddr + (i * entry_size);
+            add_string(ctx, entry_vmaddr, section_offset + (i * entry_size),
+                      buf, (uint32_t)str_len, "__cfstring", false);
+            found++;
+        }
+
+        free(buf);
+    }
+
     free(data);
     return found;
 }

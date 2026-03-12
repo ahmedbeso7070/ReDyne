@@ -3,8 +3,8 @@
 #include <string.h>
 #include <mach-o/loader.h>
 
-#define MAX_IMPORTS 10000
-#define MAX_EXPORTS 10000
+#define MAX_IMPORTS 100000
+#define MAX_EXPORTS 100000
 #define MAX_LIBRARIES 500
 
 // MARK: - Helper Functions
@@ -13,15 +13,16 @@ static uint64_t read_uleb128(const uint8_t **ptr, const uint8_t *end) {
     uint64_t result = 0;
     int shift = 0;
     uint8_t byte;
-    
+
     do {
         if (*ptr >= end) return 0;
+        if (shift >= 64) return 0;
         byte = **ptr;
         (*ptr)++;
         result |= ((uint64_t)(byte & 0x7f)) << shift;
         shift += 7;
     } while (byte & 0x80);
-    
+
     return result;
 }
 
@@ -32,6 +33,7 @@ static int64_t read_sleb128(const uint8_t **ptr, const uint8_t *end) {
     
     do {
         if (*ptr >= end) return 0;
+        if (shift >= 64) return 0;
         byte = **ptr;
         (*ptr)++;
         result |= ((int64_t)(byte & 0x7f)) << shift;
@@ -50,8 +52,6 @@ static int64_t read_sleb128(const uint8_t **ptr, const uint8_t *end) {
 LibraryList* dyld_parse_libraries(MachOContext *ctx) {
     if (!ctx) return NULL;
     
-    printf("  Parsing linked libraries...\n");
-    
     LibraryList *list = (LibraryList*)calloc(1, sizeof(LibraryList));
     if (!list) return NULL;
     
@@ -68,18 +68,20 @@ LibraryList* dyld_parse_libraries(MachOContext *ctx) {
         uint32_t cmd, cmdsize;
         long cmd_start = ftell(ctx->file);
         
-        fread(&cmd, sizeof(uint32_t), 1, ctx->file);
-        fread(&cmdsize, sizeof(uint32_t), 1, ctx->file);
-        
+        if (fread(&cmd, sizeof(uint32_t), 1, ctx->file) != 1) break;
+        if (fread(&cmdsize, sizeof(uint32_t), 1, ctx->file) != 1) break;
+
         if (ctx->header.is_swapped) {
             cmd = __builtin_bswap32(cmd);
             cmdsize = __builtin_bswap32(cmdsize);
         }
-        
+
+        if (cmd_start + cmdsize > ctx->file_size) break;
+
         if (cmd == LC_LOAD_DYLIB || cmd == LC_LOAD_WEAK_DYLIB || cmd == LC_REEXPORT_DYLIB) {
             struct dylib_command dylib_cmd;
             fseek(ctx->file, cmd_start, SEEK_SET);
-            fread(&dylib_cmd, sizeof(struct dylib_command), 1, ctx->file);
+            if (fread(&dylib_cmd, sizeof(struct dylib_command), 1, ctx->file) != 1) break;
             
             if (ctx->header.is_swapped) {
                 dylib_cmd.dylib.name.offset = __builtin_bswap32(dylib_cmd.dylib.name.offset);
@@ -103,7 +105,6 @@ LibraryList* dyld_parse_libraries(MachOContext *ctx) {
         fseek(ctx->file, cmd_start + cmdsize, SEEK_SET);
     }
     
-    printf("   Found %d linked libraries\n", list->library_count);
     return list;
 }
 
@@ -112,8 +113,6 @@ LibraryList* dyld_parse_libraries(MachOContext *ctx) {
 ImportList* dyld_parse_imports(MachOContext *ctx) {
     if (!ctx) return NULL;
     
-    printf("Parsing imports (binding info)...\n");
-    
     ImportList *list = (ImportList*)calloc(1, sizeof(ImportList));
     if (!list) return NULL;
     
@@ -121,16 +120,25 @@ ImportList* dyld_parse_imports(MachOContext *ctx) {
     list->import_count = 0;
     
     if (!ctx->has_dyld_info || ctx->bind_size == 0) {
-        printf("   No binding info found\n");
         return list;
     }
     
     uint32_t bind_offset = ctx->bind_off;
     uint32_t bind_size = ctx->bind_size;
-    
+
+    if ((uint64_t)bind_offset + bind_size > (uint64_t)ctx->file_size) {
+        return list;
+    }
+
     uint8_t *bind_data = (uint8_t*)malloc(bind_size);
+    if (!bind_data) {
+        return list;
+    }
     fseek(ctx->file, bind_offset, SEEK_SET);
-    fread(bind_data, 1, bind_size, ctx->file);
+    if (fread(bind_data, 1, bind_size, ctx->file) != bind_size) {
+        free(bind_data);
+        return list;
+    }
     
     const uint8_t *ptr = bind_data;
     const uint8_t *end = bind_data + bind_size;
@@ -161,11 +169,17 @@ ImportList* dyld_parse_imports(MachOContext *ctx) {
                 library_ordinal = (int)read_uleb128(&ptr, end);
                 break;
                 
-            case 0x40:
-                symbol_name = (const char*)ptr;
+            case 0x40: {
+                const uint8_t *name_start = ptr;
                 while (ptr < end && *ptr) ptr++;
-                if (ptr < end) ptr++;
+                if (ptr >= end) {
+                    symbol_name = "";
+                } else {
+                    symbol_name = (const char*)name_start;
+                    ptr++;
+                }
                 break;
+            }
                 
             case 0x50:
                 type = immediate;
@@ -200,7 +214,6 @@ ImportList* dyld_parse_imports(MachOContext *ctx) {
     }
     
     free(bind_data);
-    printf("   Found %d imports\n", list->import_count);
     return list;
 }
 
@@ -213,10 +226,11 @@ typedef struct {
     ExportInfo *exports;
 } TrieContext;
 
-static void traverse_export_trie(TrieContext *tctx, const uint8_t *p, const char *prefix, uint32_t prefix_len);
-static void traverse_export_trie(TrieContext *tctx, const uint8_t *p, const char *prefix, uint32_t prefix_len) {
-    
+static void traverse_export_trie(TrieContext *tctx, const uint8_t *p, const char *prefix, uint32_t prefix_len, int depth);
+static void traverse_export_trie(TrieContext *tctx, const uint8_t *p, const char *prefix, uint32_t prefix_len, int depth) {
+
     if (!tctx || !p || !prefix) return;
+    if (depth > 128) return;
     if (p < tctx->data || p >= tctx->data + tctx->size) return;
     if (tctx->export_count >= MAX_EXPORTS) return;
     if (prefix_len > 255) return;
@@ -304,15 +318,13 @@ static void traverse_export_trie(TrieContext *tctx, const uint8_t *p, const char
         new_prefix[prefix_len + label_len] = '\0';
         
         if (child_offset < tctx->size) {
-            traverse_export_trie(tctx, tctx->data + child_offset, new_prefix, prefix_len + label_len);
+            traverse_export_trie(tctx, tctx->data + child_offset, new_prefix, prefix_len + label_len, depth + 1);
         }
     }
 }
 
 ExportList* dyld_parse_exports(MachOContext *ctx) {
     if (!ctx) return NULL;
-    
-    printf("   Parsing exports...\n");
     
     ExportList *list = (ExportList*)calloc(1, sizeof(ExportList));
     if (!list) return NULL;
@@ -321,15 +333,25 @@ ExportList* dyld_parse_exports(MachOContext *ctx) {
     list->export_count = 0;
     
     if (!ctx->has_dyld_info || ctx->export_size == 0) {
-        printf("   No export info found\n");
         return list;
     }
     
     uint32_t export_offset = ctx->export_off;
     uint32_t export_size = ctx->export_size;
+
+    if ((uint64_t)export_offset + export_size > (uint64_t)ctx->file_size) {
+        return list;
+    }
+
     uint8_t *export_data = (uint8_t*)malloc(export_size);
+    if (!export_data) {
+        return list;
+    }
     fseek(ctx->file, export_offset, SEEK_SET);
-    fread(export_data, 1, export_size, ctx->file);
+    if (fread(export_data, 1, export_size, ctx->file) != export_size) {
+        free(export_data);
+        return list;
+    }
     
     TrieContext tctx = {
         .data = export_data,
@@ -339,12 +361,11 @@ ExportList* dyld_parse_exports(MachOContext *ctx) {
     };
     
     if (export_size > 0) {
-        traverse_export_trie(&tctx, export_data, "", 0);
+        traverse_export_trie(&tctx, export_data, "", 0, 0);
     }
     
     list->export_count = tctx.export_count;
-    printf("   Parsed %u exports from trie\n", list->export_count);
-    
+
     free(export_data);
     return list;
 }

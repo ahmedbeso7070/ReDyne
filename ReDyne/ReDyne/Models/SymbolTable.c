@@ -74,10 +74,12 @@ bool symbol_table_load_strings(SymbolTableContext *ctx) {
     MachOContext *mctx = ctx->macho_ctx;
     if (mctx->strsize == 0) return false;
     
+    if (mctx->stroff + mctx->strsize > (uint64_t)mctx->file_size) return false;
+
     ctx->string_table_size = mctx->strsize;
     ctx->string_table = (char*)malloc(ctx->string_table_size);
     if (!ctx->string_table) return false;
-    
+
     fseek(mctx->file, mctx->stroff, SEEK_SET);
     size_t read = fread(ctx->string_table, 1, ctx->string_table_size, mctx->file);
     
@@ -103,9 +105,21 @@ bool symbol_table_parse(SymbolTableContext *ctx) {
     if (!symbol_table_load_strings(ctx)) return false;
     
     MachOContext *mctx = ctx->macho_ctx;
-    
+
+    if (ctx->symbol_count > 500000) {
+        ctx->symbol_count = 500000;
+    }
+
+    if (mctx->header.is_64bit) {
+        if (mctx->symtab_offset + ((uint64_t)ctx->symbol_count * sizeof(struct nlist_64)) > (uint64_t)mctx->file_size)
+            return false;
+    } else {
+        if (mctx->symtab_offset + ((uint64_t)ctx->symbol_count * sizeof(struct nlist)) > (uint64_t)mctx->file_size)
+            return false;
+    }
+
     fseek(mctx->file, mctx->symtab_offset, SEEK_SET);
-    
+
     if (mctx->header.is_64bit) {
         for (uint32_t i = 0; i < ctx->symbol_count; i++) {
             struct nlist_64 nlist;
@@ -353,14 +367,14 @@ bool symbol_table_parse_dysymtab(SymbolTableContext *ctx) {
         uint32_t cmd, cmdsize;
         long cmd_start = ftell(file);
         
-        fread(&cmd, sizeof(uint32_t), 1, file);
-        fread(&cmdsize, sizeof(uint32_t), 1, file);
-        
+        if (fread(&cmd, sizeof(uint32_t), 1, file) != 1) return false;
+        if (fread(&cmdsize, sizeof(uint32_t), 1, file) != 1) return false;
+
         if (is_swapped) {
             cmd = __builtin_bswap32(cmd);
             cmdsize = __builtin_bswap32(cmdsize);
         }
-        
+
         if (cmd == LC_DYSYMTAB) {
             struct {
                 uint32_t ilocalsym;
@@ -396,9 +410,15 @@ bool symbol_table_parse_dysymtab(SymbolTableContext *ctx) {
                 dysymtab.nindirectsyms = __builtin_bswap32(dysymtab.nindirectsyms);
             }
             
+            if ((uint64_t)dysymtab.ilocalsym + dysymtab.nlocalsym > ctx->symbol_count ||
+                (uint64_t)dysymtab.iextdefsym + dysymtab.nextdefsym > ctx->symbol_count ||
+                (uint64_t)dysymtab.iundefsym + dysymtab.nundefsym > ctx->symbol_count) {
+                return false;
+            }
+
             if (ctx->symbols && ctx->symbol_count > 0) {
-                for (uint32_t j = dysymtab.ilocalsym; 
-                     j < dysymtab.ilocalsym + dysymtab.nlocalsym && j < ctx->symbol_count; 
+                for (uint32_t j = dysymtab.ilocalsym;
+                     j < dysymtab.ilocalsym + dysymtab.nlocalsym && j < ctx->symbol_count;
                      j++) {
                     ctx->symbols[j].scope = 0x00;
                 }

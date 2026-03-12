@@ -72,7 +72,8 @@ class XrefsViewController: UIViewController {
     }()
     
     // MARK: - Properties
-    
+
+    weak var navigationDelegate: AnalysisNavigationDelegate?
     private let xrefAnalysis: XrefAnalysisResult
     private var displayedXrefs: [CrossReference] = []
     private var filteredXrefs: [CrossReference] = []
@@ -269,23 +270,52 @@ extension XrefsViewController: UITableViewDelegate {
     }
     
     private func showXrefDetail(_ xref: CrossReference) {
-        let alert = UIAlertController(title: "Cross-Reference Details", message: nil, preferredStyle: .alert)
-        
         let message = """
         Type: \(xref.xrefType.displayName) \(xref.xrefType.symbol)
-        
-        From: \(Constants.formatAddress(xref.fromAddress))
-        \(xref.fromSymbol.isEmpty ? "" : "Symbol: \(xref.fromSymbol)\n")
-        To: \(Constants.formatAddress(xref.toAddress))
-        \(xref.toSymbol.isEmpty ? "" : "Symbol: \(xref.toSymbol)\n")
+
+        From: \(Constants.formatAddress(xref.fromAddress))\(xref.fromSymbol.isEmpty ? "" : "\nSymbol: \(xref.fromSymbol)")
+
+        To: \(Constants.formatAddress(xref.toAddress))\(xref.toSymbol.isEmpty ? "" : "\nSymbol: \(xref.toSymbol)")
+
         Instruction:
         \(xref.instruction)
         """
-        
-        let messageAttr = NSMutableAttributedString(string: message)
-        alert.setValue(messageAttr, forKey: "attributedMessage")
-        
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+
+        let alert = UIAlertController(title: "Cross-Reference", message: message, preferredStyle: .actionSheet)
+
+        alert.addAction(UIAlertAction(title: "Go to Source (\(Constants.formatAddress(xref.fromAddress)))", style: .default) { [weak self] _ in
+            self?.navigationDelegate?.navigateToDisassembly(atAddress: xref.fromAddress)
+        })
+
+        alert.addAction(UIAlertAction(title: "Go to Target (\(Constants.formatAddress(xref.toAddress)))", style: .default) { [weak self] _ in
+            self?.navigationDelegate?.navigateToDisassembly(atAddress: xref.toAddress)
+        })
+
+        if !xref.toSymbol.isEmpty {
+            alert.addAction(UIAlertAction(title: "Find Symbol: \(xref.toSymbol)", style: .default) { [weak self] _ in
+                self?.navigationDelegate?.navigateToSymbol(named: xref.toSymbol)
+            })
+        }
+
+        alert.addAction(UIAlertAction(title: "View Target in Hex", style: .default) { [weak self] _ in
+            self?.navigationDelegate?.navigateToHexView(atOffset: xref.toAddress)
+        })
+
+        alert.addAction(UIAlertAction(title: "Copy From Address", style: .default) { _ in
+            UIPasteboard.general.string = Constants.formatAddress(xref.fromAddress)
+        })
+
+        alert.addAction(UIAlertAction(title: "Copy To Address", style: .default) { _ in
+            UIPasteboard.general.string = Constants.formatAddress(xref.toAddress)
+        })
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+        }
+
         present(alert, animated: true)
     }
 }

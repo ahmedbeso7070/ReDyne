@@ -185,7 +185,7 @@ class DecompileViewController: UIViewController {
                 
                 self.updateStatus("Analyzing cross-references...", progress: 0.85)
                 let disassemblyText = instructions.map { $0.fullDisassembly }.joined(separator: "\n")
-                let symbols = (output.symbols as NSArray).map { $0 as! SymbolModel }
+                let symbols = (output.symbols as? [SymbolModel]) ?? []
                 let symbolInfos = symbols.map { SymbolInfo(from: $0) }
                 let xrefResult = XrefAnalyzer.analyze(disassembly: disassemblyText, symbols: symbolInfos)
                 output.xrefAnalysis = xrefResult
@@ -203,6 +203,14 @@ class DecompileViewController: UIViewController {
                 output.totalObjCMethods = UInt(objcResult.totalMethods)
             }
             
+            self.updateStatus("Parsing Swift metadata...", progress: 0.91)
+            if let sections = output.sections as? [SectionModel] {
+                let is64Bit = output.header.is64Bit
+                if let swiftResult = SwiftMetadataService.parseSwiftMetadata(atPath: self.fileURL.path, sections: sections, is64Bit: is64Bit) {
+                    output.swiftMetadata = swiftResult
+                }
+            }
+
             self.updateStatus("Analyzing imports and exports...", progress: 0.93)
             if let importExportResult = ObjCParserBridge.parseImportsExports(atPath: self.fileURL.path) as? ImportExportAnalysis {
                 output.importExportAnalysis = importExportResult
@@ -216,11 +224,26 @@ class DecompileViewController: UIViewController {
                 output.codeSigningAnalysis = codeSignResult
             }
             
+            self.updateStatus("Analyzing security posture...", progress: 0.96)
+            if let securityPosture = SecurityPostureService.analyze(binaryPath: self.fileURL.path) {
+                output.securityPosture = securityPosture
+            }
+
             self.updateStatus("Analyzing control flow graphs...", progress: 0.97)
-            let functions = (output.functions as NSArray).map { $0 as! FunctionModel }
+            let functions = (output.functions as? [FunctionModel]) ?? []
             let cfgResult = CFGAnalyzer.analyze(functions: functions)
             output.cfgAnalysis = cfgResult
             
+            self.updateStatus("Demangling symbols...", progress: 0.98)
+            if let symbols = output.symbols as? [SymbolModel] {
+                SwiftDemangler.demangleSymbols(symbols)
+            }
+            if let functions = output.functions as? [FunctionModel] {
+                for function in functions {
+                    function.demangledName = SwiftDemangler.demangle(function.name)
+                }
+            }
+
             self.updateStatus("Finalizing...", progress: 0.99)
             
             DispatchQueue.main.async {
