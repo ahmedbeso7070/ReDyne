@@ -22,6 +22,10 @@
 	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>ReDyne needs access to save decompilation reports.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -38,6 +42,15 @@
 				</dict>
 			</array>
 		</dict>
+	</dict>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string></string>
+		<key>UIImageName</key>
+		<string></string>
 	</dict>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
@@ -58,20 +71,7 @@
 	</array>
 	<key>UISupportsDocumentBrowser</key>
 	<true/>
-	<key>LSSupportsOpeningDocumentsInPlace</key>
-	<true/>
-	<key>UIFileSharingEnabled</key>
-	<true/>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>ReDyne needs access to save decompilation reports.</string>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
-	<key>UILaunchScreen</key>
-	<dict>
-		<key>UIColorName</key>
-		<string></string>
-		<key>UIImageName</key>
-		<string></string>
-	</dict>
 </dict>
 </plist>

@@ -6,7 +6,26 @@
 @implementation AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    // Register for memory warnings
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handleMemoryWarning:)
+                                                 name:UIApplicationDidReceiveMemoryWarningNotification
+                                               object:nil];
     return YES;
+}
+
+- (void)handleMemoryWarning:(NSNotification *)notification {
+    // Clear URL caches
+    [[NSURLCache sharedURLCache] removeAllCachedResponses];
+
+    // Clear temporary files
+    NSString *tmpDir = NSTemporaryDirectory();
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *tmpFiles = [fm contentsOfDirectoryAtPath:tmpDir error:nil];
+    for (NSString *file in tmpFiles) {
+        NSString *path = [tmpDir stringByAppendingPathComponent:file];
+        [fm removeItemAtPath:path error:nil];
+    }
 }
 
 #pragma mark - UISceneSession Lifecycle

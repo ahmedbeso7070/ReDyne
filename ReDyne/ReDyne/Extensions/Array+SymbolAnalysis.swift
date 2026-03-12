@@ -30,10 +30,11 @@ extension Array where Element: AnyObject {
     func searchSymbols(query: String) -> [Element] {
         guard let symbols = self as? [SymbolModel] else { return [] }
         guard !query.isEmpty else { return self }
-        
+
         let lowercased = query.lowercased()
         return symbols.filter { symbol in
-            symbol.name.lowercased().contains(lowercased)
+            symbol.name.lowercased().contains(lowercased) ||
+            (symbol.demangledName?.lowercased().contains(lowercased) ?? false)
         } as! [Element]
     }
     
@@ -181,7 +182,10 @@ extension Array where Element == FunctionModel {
     func search(name: String) -> [FunctionModel] {
         guard !name.isEmpty else { return self }
         let lowercased = name.lowercased()
-        return filter { $0.name.lowercased().contains(lowercased) }
+        return filter {
+            $0.name.lowercased().contains(lowercased) ||
+            ($0.demangledName?.lowercased().contains(lowercased) ?? false)
+        }
     }
 }
 
