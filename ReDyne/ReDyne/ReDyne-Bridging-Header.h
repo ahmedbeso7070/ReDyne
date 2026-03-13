@@ -15,10 +15,13 @@
 #import "RelocationInfo.h"
 #import "ObjCParser.h"
 #import "DyldInfo.h"
+#import "ChainedFixups.h"
 #import "CodeSignature.h"
 #import "EnhancedFilePicker.h"
 #import "PseudocodeGenerator.h"
 #import "ARM64InstructionDecoder.h"
+#import "SecurityAnalyzer.h"
+#import "SwiftMetadata.h"
 
 #endif
 

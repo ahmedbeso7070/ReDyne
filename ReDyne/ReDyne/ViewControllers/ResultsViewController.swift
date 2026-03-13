@@ -175,6 +175,32 @@ class ResultsViewController: UIViewController {
     private let output: DecompiledOutput
     private var currentViewController: UIViewController?
 
+    // MARK: - Navigation History
+
+    private let navigationHistoryManager = NavigationHistoryManager()
+
+    private lazy var backButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "chevron.left"),
+            style: .plain,
+            target: self,
+            action: #selector(navigateBack)
+        )
+        button.isEnabled = false
+        return button
+    }()
+
+    private lazy var forwardButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "chevron.right"),
+            style: .plain,
+            target: self,
+            action: #selector(navigateForward)
+        )
+        button.isEnabled = false
+        return button
+    }()
+
     // MARK: - Initialization
 
     init(output: DecompiledOutput) {
@@ -198,6 +224,7 @@ class ResultsViewController: UIViewController {
         setupNavigationBar()
 
         showViewController(headerViewController)
+        navigationHistoryManager.push(entry: .section(index: 0))
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
@@ -335,6 +362,73 @@ class ResultsViewController: UIViewController {
         )
 
         navigationItem.rightBarButtonItems = [exportButton, moreButton, infoButton, globalSearchButton, bookmarkButton]
+        navigationItem.leftBarButtonItems = [backButton, forwardButton]
+    }
+
+    // MARK: - Navigation History Actions
+
+    @objc private func navigateBack() {
+        guard let entry = navigationHistoryManager.goBack() else { return }
+        replayNavigationEntry(entry)
+        updateNavigationHistoryButtons()
+    }
+
+    @objc private func navigateForward() {
+        guard let entry = navigationHistoryManager.goForward() else { return }
+        replayNavigationEntry(entry)
+        updateNavigationHistoryButtons()
+    }
+
+    private func updateNavigationHistoryButtons() {
+        backButton.isEnabled = navigationHistoryManager.canGoBack
+        forwardButton.isEnabled = navigationHistoryManager.canGoForward
+    }
+
+    /// Replays a `NavigationEntry` without recording it into the history stack.
+    private func replayNavigationEntry(_ entry: NavigationEntry) {
+        navigationHistoryManager.performWithoutRecording { [weak self] in
+            guard let self = self else { return }
+            switch entry {
+            case .section(let index):
+                self.switchToSection(index)
+
+            case .disassembly(let address):
+                if let nav = self.navigationController, nav.topViewController !== self {
+                    nav.popToViewController(self, animated: false)
+                }
+                if self.presentedViewController != nil {
+                    self.dismiss(animated: false)
+                }
+                self.switchToSection(3)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.disassemblyViewController.scrollToAddress(address)
+                }
+
+            case .symbol(let name):
+                if let nav = self.navigationController, nav.topViewController !== self {
+                    nav.popToViewController(self, animated: false)
+                }
+                if self.presentedViewController != nil {
+                    self.dismiss(animated: false)
+                }
+                self.switchToSection(1)
+                self.searchBar.text = name
+                self.symbolsViewController.filterSymbols(query: name)
+
+            case .hexView(let offset):
+                let fileURL = URL(fileURLWithPath: self.output.filePath)
+                let sectionInfos: [SectionDisplayInfo] = (self.output.sections as? [SectionModel])?.map {
+                    SectionDisplayInfo(name: "\($0.segmentName),\($0.sectionName)",
+                                       offset: UInt64($0.offset),
+                                       size: $0.size)
+                } ?? []
+                let hexVC = HexViewerViewController(fileURL: fileURL, sections: sectionInfos.isEmpty ? nil : sectionInfos)
+                self.navigationController?.pushViewController(hexVC, animated: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    hexVC.scrollToOffset(offset)
+                }
+            }
+        }
     }
 
     @objc private func showGlobalSearch() {
@@ -418,7 +512,10 @@ class ResultsViewController: UIViewController {
     }
 
     @objc private func segmentChanged() {
-        switchToSection(segmentedControl.selectedSegmentIndex)
+        let index = segmentedControl.selectedSegmentIndex
+        switchToSection(index)
+        navigationHistoryManager.push(entry: .section(index: index))
+        updateNavigationHistoryButtons()
     }
 
     // MARK: - Actions
@@ -465,6 +562,8 @@ class ResultsViewController: UIViewController {
     func selectSegment(_ index: Int) {
         guard index >= 0, index < segmentedControl.numberOfSegments else { return }
         switchToSection(index)
+        navigationHistoryManager.push(entry: .section(index: index))
+        updateNavigationHistoryButtons()
     }
 
     // MARK: - Export Methods
@@ -609,6 +708,8 @@ extension ResultsViewController: UITableViewDataSource, UITableViewDelegate {
         guard tableView === sidebarTableView else { return }
         let item = sidebarItems[indexPath.row]
         switchToSection(item.segmentIndex)
+        navigationHistoryManager.push(entry: .section(index: item.segmentIndex))
+        updateNavigationHistoryButtons()
     }
 }
 
@@ -783,6 +884,8 @@ extension ResultsViewController: AnalysisNavigationDelegate {
             dismiss(animated: false)
         }
         switchToSection(3)
+        navigationHistoryManager.push(entry: .disassembly(address: address))
+        updateNavigationHistoryButtons()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             self?.disassemblyViewController.scrollToAddress(address)
         }
@@ -798,6 +901,8 @@ extension ResultsViewController: AnalysisNavigationDelegate {
         switchToSection(1)
         searchBar.text = name
         symbolsViewController.filterSymbols(query: name)
+        navigationHistoryManager.push(entry: .symbol(name: name))
+        updateNavigationHistoryButtons()
     }
 
     func navigateToHexView(atOffset offset: UInt64) {
@@ -809,6 +914,8 @@ extension ResultsViewController: AnalysisNavigationDelegate {
         } ?? []
         let hexVC = HexViewerViewController(fileURL: fileURL, sections: sectionInfos.isEmpty ? nil : sectionInfos)
         navigationController?.pushViewController(hexVC, animated: true)
+        navigationHistoryManager.push(entry: .hexView(offset: offset))
+        updateNavigationHistoryButtons()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             hexVC.scrollToOffset(offset)
         }
