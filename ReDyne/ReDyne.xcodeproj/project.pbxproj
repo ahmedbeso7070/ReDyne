@@ -6,7 +6,18 @@
 	objectVersion = 70;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		22B86C502F6FBC3B00E1EADF /* ReDyn-Share.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 22B86C462F6FBC3B00E1EADF /* ReDyn-Share.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
+		22B86C4E2F6FBC3B00E1EADF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E1923CDC2E93568A0083A72D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 22B86C452F6FBC3B00E1EADF;
+			remoteInfo = "ReDyn-Share";
+		};
 		E1923CF22E93568A0083A72D /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = E1923CDC2E93568A0083A72D /* Project object */;
@@ -23,13 +34,35 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		22B86C552F6FBC3B00E1EADF /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				22B86C502F6FBC3B00E1EADF /* ReDyn-Share.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		22B86C462F6FBC3B00E1EADF /* ReDyn-Share.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "ReDyn-Share.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		E1923CE42E93568A0083A72D /* ReDyne.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ReDyne.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E1923CF12E93568A0083A72D /* ReDyneTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ReDyneTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E1923CFB2E93568A0083A72D /* ReDyneUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ReDyneUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		22B86C542F6FBC3B00E1EADF /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 22B86C452F6FBC3B00E1EADF /* ReDyn-Share */;
+		};
 		E1923D4D2E935DE00083A72D /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -40,12 +73,20 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		22B86C472F6FBC3B00E1EADF /* ReDyn-Share */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (22B86C542F6FBC3B00E1EADF /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "ReDyn-Share"; sourceTree = "<group>"; };
 		E1923CE62E93568A0083A72D /* ReDyne */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (E1923D4D2E935DE00083A72D /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = ReDyne; sourceTree = "<group>"; };
 		E1923CF42E93568A0083A72D /* ReDyneTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = ReDyneTests; sourceTree = "<group>"; };
 		E1923CFE2E93568A0083A72D /* ReDyneUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = ReDyneUITests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		22B86C432F6FBC3B00E1EADF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E1923CE12E93568A0083A72D /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -76,6 +117,7 @@
 				E1923CE62E93568A0083A72D /* ReDyne */,
 				E1923CF42E93568A0083A72D /* ReDyneTests */,
 				E1923CFE2E93568A0083A72D /* ReDyneUITests */,
+				22B86C472F6FBC3B00E1EADF /* ReDyn-Share */,
 				E1923CE52E93568A0083A72D /* Products */,
 			);
 			sourceTree = "<group>";
@@ -86,6 +128,7 @@
 				E1923CE42E93568A0083A72D /* ReDyne.app */,
 				E1923CF12E93568A0083A72D /* ReDyneTests.xctest */,
 				E1923CFB2E93568A0083A72D /* ReDyneUITests.xctest */,
+				22B86C462F6FBC3B00E1EADF /* ReDyn-Share.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -93,6 +136,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		22B86C452F6FBC3B00E1EADF /* ReDyn-Share */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 22B86C512F6FBC3B00E1EADF /* Build configuration list for PBXNativeTarget "ReDyn-Share" */;
+			buildPhases = (
+				22B86C422F6FBC3B00E1EADF /* Sources */,
+				22B86C432F6FBC3B00E1EADF /* Frameworks */,
+				22B86C442F6FBC3B00E1EADF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				22B86C472F6FBC3B00E1EADF /* ReDyn-Share */,
+			);
+			name = "ReDyn-Share";
+			packageProductDependencies = (
+			);
+			productName = "ReDyn-Share";
+			productReference = 22B86C462F6FBC3B00E1EADF /* ReDyn-Share.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		E1923CE32E93568A0083A72D /* ReDyne */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = E1923D052E93568A0083A72D /* Build configuration list for PBXNativeTarget "ReDyne" */;
@@ -100,10 +165,12 @@
 				E1923CE02E93568A0083A72D /* Sources */,
 				E1923CE12E93568A0083A72D /* Frameworks */,
 				E1923CE22E93568A0083A72D /* Resources */,
+				22B86C552F6FBC3B00E1EADF /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				22B86C4F2F6FBC3B00E1EADF /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				E1923CE62E93568A0083A72D /* ReDyne */,
@@ -168,9 +235,12 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2600;
+				LastSwiftUpdateCheck = 2630;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
+					22B86C452F6FBC3B00E1EADF = {
+						CreatedOnToolsVersion = 26.3;
+					};
 					E1923CE32E93568A0083A72D = {
 						CreatedOnToolsVersion = 26.0.1;
 					};
@@ -201,11 +271,19 @@
 				E1923CE32E93568A0083A72D /* ReDyne */,
 				E1923CF02E93568A0083A72D /* ReDyneTests */,
 				E1923CFA2E93568A0083A72D /* ReDyneUITests */,
+				22B86C452F6FBC3B00E1EADF /* ReDyn-Share */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		22B86C442F6FBC3B00E1EADF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E1923CE22E93568A0083A72D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -230,6 +308,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		22B86C422F6FBC3B00E1EADF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E1923CE02E93568A0083A72D /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -254,6 +339,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		22B86C4F2F6FBC3B00E1EADF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 22B86C452F6FBC3B00E1EADF /* ReDyn-Share */;
+			targetProxy = 22B86C4E2F6FBC3B00E1EADF /* PBXContainerItemProxy */;
+		};
 		E1923CF32E93568A0083A72D /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = E1923CE32E93568A0083A72D /* ReDyne */;
@@ -267,6 +357,66 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		22B86C522F6FBC3B00E1EADF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "ReDyn-Share/ReDyn-Share.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7LM8QL2H74;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ReDyn-Share/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "ReDyn-Share";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.jian.ReDyne.ReDyn-Share";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		22B86C532F6FBC3B00E1EADF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "ReDyn-Share/ReDyn-Share.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7LM8QL2H74;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ReDyn-Share/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "ReDyn-Share";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.jian.ReDyne.ReDyn-Share";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		E1923D032E93568A0083A72D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -393,6 +543,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ReDyne/ReDyne.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 7LM8QL2H74;
@@ -428,6 +579,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ReDyne/ReDyne.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 7LM8QL2H74;
@@ -468,7 +620,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.jian.ReDyneTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jian.ReDyne;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -490,7 +642,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.jian.ReDyneTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jian.ReDyne;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -510,7 +662,7 @@
 				DEVELOPMENT_TEAM = 7LM8QL2H74;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.jian.ReDyneUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jian.ReDyne;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -530,7 +682,7 @@
 				DEVELOPMENT_TEAM = 7LM8QL2H74;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.jian.ReDyneUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jian.ReDyne;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -545,6 +697,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		22B86C512F6FBC3B00E1EADF /* Build configuration list for PBXNativeTarget "ReDyn-Share" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				22B86C522F6FBC3B00E1EADF /* Debug */,
+				22B86C532F6FBC3B00E1EADF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		E1923CDF2E93568A0083A72D /* Build configuration list for PBXProject "ReDyne" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
