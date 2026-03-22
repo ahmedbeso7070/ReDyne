@@ -80,6 +80,7 @@ import Combine
         setupDragAndDrop()
         loadRecentFiles()
         configureFilePickerMode()
+        setupShareNotificationObserver()
 
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             image: UIImage(systemName: "gear"),
@@ -87,6 +88,36 @@ import Combine
             target: self,
             action: #selector(showSettings)
         )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    // MARK: - Share Sheet Support
+
+    private func setupShareNotificationObserver() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOpenFileFromShare(_:)),
+            name: NSNotification.Name("ReDyneOpenFileFromShareNotification"),
+            object: nil
+        )
+    }
+
+    @objc private func handleOpenFileFromShare(_ notification: Notification) {
+        guard let fileURL = notification.userInfo?["fileURL"] as? URL else {
+            print("⚠️ Share notification received but no fileURL found")
+            return
+        }
+
+        print("📦 Opening shared file: \(fileURL.lastPathComponent)")
+
+        // Pop to root first if we're deep in the navigation stack
+        navigationController?.popToRootViewController(animated: false)
+
+        // Process the file
+        processFile(at: fileURL)
     }
     
     override func viewDidAppear(_ animated: Bool) {
