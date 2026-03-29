@@ -3,6 +3,9 @@
 #include <string.h>
 #include <mach/machine.h>
 
+///# magic: "bpli" which is a first 4 bytes of "bplist00" read as LE uint32
+#define BPLIST_MAGIC_LE 0x696C7062U
+
 #pragma mark - Byte Swapping Utilities
 
 uint16_t swap_uint16(uint16_t val) {
@@ -40,6 +43,7 @@ const char* macho_magic_string(uint32_t magic) {
         case FAT_CIGAM: return "FAT_CIGAM (Universal Binary, swapped)";
         case 0xcafebabf: return "FAT_MAGIC_64 (64-bit Universal Binary)";
         case 0xbfbafeca: return "FAT_CIGAM_64 (64-bit Universal Binary, swapped)";
+        case BPLIST_MAGIC_LE: return "Binary Property List (bplist container)";
         default: return "Unknown/Invalid";
     }
 }
@@ -311,6 +315,30 @@ bool macho_validate_load_commands(MachOContext *ctx) {
     return true;
 }
 
+#pragma mark - Embedded Mach-O Search
+
+static uint64_t macho_find_embedded_macho(FILE *file, long file_size) {
+    static const uint32_t macho_magics[] = {
+        MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC, MH_CIGAM,
+        FAT_MAGIC, FAT_CIGAM, 0xcafebabf, 0xbfbafeca
+    };
+    static const int num_magics = 8;
+
+    long scan_limit = (file_size < (16 * 1024 * 1024)) ? file_size : (16 * 1024 * 1024);
+    uint32_t candidate;
+
+    for (long off = 8; off + (long)sizeof(uint32_t) <= scan_limit; off += 4) {
+        fseek(file, off, SEEK_SET);
+        if (fread(&candidate, sizeof(uint32_t), 1, file) != 1) break;
+        for (int i = 0; i < num_magics; i++) {
+            if (candidate == macho_magics[i]) {
+                return (uint64_t)off;
+            }
+        }
+    }
+    return UINT64_MAX;
+}
+
 #pragma mark - Context Management
 
 MachOContext* macho_open(const char *filepath, char *error_msg) {
@@ -362,9 +390,22 @@ MachOContext* macho_open(const char *filepath, char *error_msg) {
     fseek(ctx->file, 0, SEEK_SET);
     
     if (!macho_is_valid_magic(magic)) {
-        if (error_msg) {
-            sprintf(error_msg, "Invalid magic number: 0x%08X (%s)\nExpected Mach-O or Universal Binary format", 
-                    magic, macho_magic_string(magic));
+        if (magic == BPLIST_MAGIC_LE) {
+            uint64_t embedded = macho_find_embedded_macho(ctx->file, ctx->file_size);
+            if (embedded != UINT64_MAX) {
+                ctx->base_offset = embedded;
+                return ctx;
+            }
+            if (error_msg) {
+                strcpy(error_msg, "File is a binary property list (system stub library).\n"
+                                  "Stub libraries contain only export metadata and no executable code.\n"
+                                  "To analyze the actual binary, extract it from the dyld shared cache.");
+            }
+        } else {
+            if (error_msg) {
+                sprintf(error_msg, "Invalid magic number: 0x%08X (%s)\nExpected Mach-O or Universal Binary format",
+                        magic, macho_magic_string(magic));
+            }
         }
         fclose(ctx->file);
         free(ctx);
@@ -397,32 +438,31 @@ void macho_close(MachOContext *ctx) {
 
 bool macho_is_fat_binary(MachOContext *ctx) {
     uint32_t magic;
-    fseek(ctx->file, 0, SEEK_SET);
+    fseek(ctx->file, (long)ctx->base_offset, SEEK_SET);
     if (fread(&magic, sizeof(uint32_t), 1, ctx->file) != 1) return false;
-    return (magic == FAT_MAGIC || magic == FAT_CIGAM || 
+    return (magic == FAT_MAGIC || magic == FAT_CIGAM ||
             magic == 0xcafebabf || magic == 0xbfbafeca);
 }
 
 uint64_t macho_select_architecture(MachOContext *ctx) {
-    if (!macho_is_fat_binary(ctx)) return 0;
-    
-    fseek(ctx->file, 0, SEEK_SET);
+    if (!macho_is_fat_binary(ctx)) return ctx->base_offset;
+
+    fseek(ctx->file, (long)ctx->base_offset, SEEK_SET);
     uint32_t magic;
-    if (fread(&magic, sizeof(uint32_t), 1, ctx->file) != 1) return 0;
-    fseek(ctx->file, 0, SEEK_SET);
-    
+    if (fread(&magic, sizeof(uint32_t), 1, ctx->file) != 1) return ctx->base_offset;
+    fseek(ctx->file, (long)ctx->base_offset, SEEK_SET);
+
     struct fat_header fheader;
-    if (fread(&fheader, sizeof(struct fat_header), 1, ctx->file) != 1) return 0;
-    
+    if (fread(&fheader, sizeof(struct fat_header), 1, ctx->file) != 1) return ctx->base_offset;
+
     bool swap = (fheader.magic == FAT_CIGAM || fheader.magic == 0xbfbafeca);
     bool is_64 = (fheader.magic == 0xcafebabf || fheader.magic == 0xbfbafeca);
     uint32_t nfat_arch = swap ? swap_uint32(fheader.nfat_arch) : fheader.nfat_arch;
-    
-    if (nfat_arch > 20) return 0;
-    
-    uint64_t offset = 0;
+
+    if (nfat_arch > 20) return ctx->base_offset;
+    uint64_t offset = ctx->base_offset;
     uint64_t arm64_offset = 0, arm64e_offset = 0, x86_64_offset = 0, arm_offset = 0, i386_offset = 0;
-    
+
     if (is_64) {
         struct fat_arch_64 {
             uint32_t cputype;
@@ -432,20 +472,21 @@ uint64_t macho_select_architecture(MachOContext *ctx) {
             uint32_t align;
             uint32_t reserved;
         } *archs_64 = malloc(sizeof(struct fat_arch_64) * nfat_arch);
-        
-        if (!archs_64) return 0;
+
+        if (!archs_64) return ctx->base_offset;
         if (fread(archs_64, sizeof(struct fat_arch_64), nfat_arch, ctx->file) != nfat_arch) {
             free(archs_64);
-            return 0;
+            return ctx->base_offset;
         }
-        
+
         for (uint32_t i = 0; i < nfat_arch; i++) {
             uint32_t cputype = swap ? swap_uint32(archs_64[i].cputype) : archs_64[i].cputype;
             uint32_t cpusubtype = swap ? swap_uint32(archs_64[i].cpusubtype) : archs_64[i].cpusubtype;
-            uint64_t arch_offset = swap ? swap_uint64(archs_64[i].offset) : archs_64[i].offset;
-            
+            uint64_t arch_offset = ctx->base_offset +
+                (swap ? swap_uint64(archs_64[i].offset) : archs_64[i].offset);
+
             cpusubtype &= ~CPU_SUBTYPE_MASK;
-            
+
             if (cputype == CPU_TYPE_ARM64) {
                 if (cpusubtype == 2) {
                     arm64e_offset = arch_offset;
@@ -463,20 +504,21 @@ uint64_t macho_select_architecture(MachOContext *ctx) {
         free(archs_64);
     } else {
         struct fat_arch *archs = malloc(sizeof(struct fat_arch) * nfat_arch);
-        if (!archs) return 0;
-        
+        if (!archs) return ctx->base_offset;
+
         if (fread(archs, sizeof(struct fat_arch), nfat_arch, ctx->file) != nfat_arch) {
             free(archs);
-            return 0;
+            return ctx->base_offset;
         }
-        
+
         for (uint32_t i = 0; i < nfat_arch; i++) {
             uint32_t cputype = swap ? swap_uint32(archs[i].cputype) : archs[i].cputype;
             uint32_t cpusubtype = swap ? swap_uint32(archs[i].cpusubtype) : archs[i].cpusubtype;
-            uint32_t arch_offset = swap ? swap_uint32(archs[i].offset) : archs[i].offset;
-            
+            uint64_t arch_offset = ctx->base_offset +
+                (uint64_t)(swap ? swap_uint32(archs[i].offset) : archs[i].offset);
+
             cpusubtype &= ~CPU_SUBTYPE_MASK;
-            
+
             if (cputype == CPU_TYPE_ARM64) {
                 if (cpusubtype == 2) {
                     arm64e_offset = arch_offset;
@@ -637,9 +679,11 @@ bool macho_parse_load_commands(MachOContext *ctx) {
         switch (lc.cmd) {
             case LC_SYMTAB: {
                 struct symtab_command *symtab = (struct symtab_command*)ctx->load_commands[i].data;
-                ctx->symtab_offset = ctx->header.is_swapped ? swap_uint32(symtab->symoff) : symtab->symoff;
+                ctx->symtab_offset = (ctx->header.is_swapped ? swap_uint32(symtab->symoff) : symtab->symoff)
+                                     + (uint32_t)ctx->base_offset;
                 ctx->nsyms = ctx->header.is_swapped ? swap_uint32(symtab->nsyms) : symtab->nsyms;
-                ctx->stroff = ctx->header.is_swapped ? swap_uint32(symtab->stroff) : symtab->stroff;
+                ctx->stroff = (ctx->header.is_swapped ? swap_uint32(symtab->stroff) : symtab->stroff)
+                              + (uint32_t)ctx->base_offset;
                 ctx->strsize = ctx->header.is_swapped ? swap_uint32(symtab->strsize) : symtab->strsize;
                 break;
             }
@@ -651,15 +695,20 @@ bool macho_parse_load_commands(MachOContext *ctx) {
             case LC_DYLD_INFO_ONLY: {
                 struct dyld_info_command *dyld = (struct dyld_info_command*)ctx->load_commands[i].data;
                 ctx->has_dyld_info = true;
-                ctx->rebase_off = ctx->header.is_swapped ? swap_uint32(dyld->rebase_off) : dyld->rebase_off;
+                ctx->rebase_off = (ctx->header.is_swapped ? swap_uint32(dyld->rebase_off) : dyld->rebase_off)
+                                  + (uint32_t)ctx->base_offset;
                 ctx->rebase_size = ctx->header.is_swapped ? swap_uint32(dyld->rebase_size) : dyld->rebase_size;
-                ctx->bind_off = ctx->header.is_swapped ? swap_uint32(dyld->bind_off) : dyld->bind_off;
+                ctx->bind_off = (ctx->header.is_swapped ? swap_uint32(dyld->bind_off) : dyld->bind_off)
+                                + (uint32_t)ctx->base_offset;
                 ctx->bind_size = ctx->header.is_swapped ? swap_uint32(dyld->bind_size) : dyld->bind_size;
-                ctx->weak_bind_off = ctx->header.is_swapped ? swap_uint32(dyld->weak_bind_off) : dyld->weak_bind_off;
+                ctx->weak_bind_off = (ctx->header.is_swapped ? swap_uint32(dyld->weak_bind_off) : dyld->weak_bind_off)
+                                     + (uint32_t)ctx->base_offset;
                 ctx->weak_bind_size = ctx->header.is_swapped ? swap_uint32(dyld->weak_bind_size) : dyld->weak_bind_size;
-                ctx->lazy_bind_off = ctx->header.is_swapped ? swap_uint32(dyld->lazy_bind_off) : dyld->lazy_bind_off;
+                ctx->lazy_bind_off = (ctx->header.is_swapped ? swap_uint32(dyld->lazy_bind_off) : dyld->lazy_bind_off)
+                                     + (uint32_t)ctx->base_offset;
                 ctx->lazy_bind_size = ctx->header.is_swapped ? swap_uint32(dyld->lazy_bind_size) : dyld->lazy_bind_size;
-                ctx->export_off = ctx->header.is_swapped ? swap_uint32(dyld->export_off) : dyld->export_off;
+                ctx->export_off = (ctx->header.is_swapped ? swap_uint32(dyld->export_off) : dyld->export_off)
+                                  + (uint32_t)ctx->base_offset;
                 ctx->export_size = ctx->header.is_swapped ? swap_uint32(dyld->export_size) : dyld->export_size;
                 break;
             }
@@ -668,7 +717,8 @@ bool macho_parse_load_commands(MachOContext *ctx) {
                 struct encryption_info_command *enc = (struct encryption_info_command*)ctx->load_commands[i].data;
                 ctx->cryptid = ctx->header.is_swapped ? swap_uint32(enc->cryptid) : enc->cryptid;
                 ctx->is_encrypted = (ctx->cryptid != 0);
-                ctx->cryptoff = ctx->header.is_swapped ? swap_uint32(enc->cryptoff) : enc->cryptoff;
+                ctx->cryptoff = (ctx->header.is_swapped ? swap_uint32(enc->cryptoff) : enc->cryptoff)
+                                + (uint32_t)ctx->base_offset;
                 ctx->cryptsize = ctx->header.is_swapped ? swap_uint32(enc->cryptsize) : enc->cryptsize;
                 break;
             }
@@ -687,28 +737,32 @@ bool macho_parse_load_commands(MachOContext *ctx) {
             case LC_FUNCTION_STARTS: {
                 struct linkedit_data_command *ldc = (struct linkedit_data_command*)ctx->load_commands[i].data;
                 ctx->has_function_starts = true;
-                ctx->function_starts_offset = ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff;
+                ctx->function_starts_offset = (ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff)
+                                              + (uint32_t)ctx->base_offset;
                 ctx->function_starts_size = ctx->header.is_swapped ? swap_uint32(ldc->datasize) : ldc->datasize;
                 break;
             }
             case LC_DATA_IN_CODE: {
                 struct linkedit_data_command *ldc = (struct linkedit_data_command*)ctx->load_commands[i].data;
                 ctx->has_data_in_code = true;
-                ctx->data_in_code_offset = ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff;
+                ctx->data_in_code_offset = (ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff)
+                                           + (uint32_t)ctx->base_offset;
                 ctx->data_in_code_size = ctx->header.is_swapped ? swap_uint32(ldc->datasize) : ldc->datasize;
                 break;
             }
             case LC_DYLD_CHAINED_FIXUPS: {
                 struct linkedit_data_command *ldc = (struct linkedit_data_command*)ctx->load_commands[i].data;
                 ctx->has_chained_fixups = true;
-                ctx->chained_fixups_offset = ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff;
+                ctx->chained_fixups_offset = (ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff)
+                                             + (uint32_t)ctx->base_offset;
                 ctx->chained_fixups_size = ctx->header.is_swapped ? swap_uint32(ldc->datasize) : ldc->datasize;
                 break;
             }
             case LC_DYLD_EXPORTS_TRIE: {
                 struct linkedit_data_command *ldc = (struct linkedit_data_command*)ctx->load_commands[i].data;
                 ctx->has_exports_trie = true;
-                ctx->exports_trie_offset = ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff;
+                ctx->exports_trie_offset = (ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff)
+                                           + (uint32_t)ctx->base_offset;
                 ctx->exports_trie_size = ctx->header.is_swapped ? swap_uint32(ldc->datasize) : ldc->datasize;
                 break;
             }
@@ -847,7 +901,8 @@ uint32_t macho_extract_segments(MachOContext *ctx) {
             strncpy(info->segname, seg->segname, 16);
             info->vmaddr = ctx->header.is_swapped ? swap_uint64(seg->vmaddr) : seg->vmaddr;
             info->vmsize = ctx->header.is_swapped ? swap_uint64(seg->vmsize) : seg->vmsize;
-            info->fileoff = ctx->header.is_swapped ? swap_uint64(seg->fileoff) : seg->fileoff;
+            info->fileoff = (ctx->header.is_swapped ? swap_uint64(seg->fileoff) : seg->fileoff)
+                            + ctx->base_offset;
             info->filesize = ctx->header.is_swapped ? swap_uint64(seg->filesize) : seg->filesize;
             info->maxprot = ctx->header.is_swapped ? swap_uint32(seg->maxprot) : seg->maxprot;
             info->initprot = ctx->header.is_swapped ? swap_uint32(seg->initprot) : seg->initprot;
@@ -880,7 +935,8 @@ uint32_t macho_extract_segments(MachOContext *ctx) {
             strncpy(info->segname, seg->segname, 16);
             info->vmaddr = ctx->header.is_swapped ? swap_uint32(seg->vmaddr) : seg->vmaddr;
             info->vmsize = ctx->header.is_swapped ? swap_uint32(seg->vmsize) : seg->vmsize;
-            info->fileoff = ctx->header.is_swapped ? swap_uint32(seg->fileoff) : seg->fileoff;
+            info->fileoff = (uint64_t)(ctx->header.is_swapped ? swap_uint32(seg->fileoff) : seg->fileoff)
+                            + ctx->base_offset;
             info->filesize = ctx->header.is_swapped ? swap_uint32(seg->filesize) : seg->filesize;
             info->maxprot = ctx->header.is_swapped ? swap_uint32(seg->maxprot) : seg->maxprot;
             info->initprot = ctx->header.is_swapped ? swap_uint32(seg->initprot) : seg->initprot;
@@ -957,7 +1013,8 @@ uint32_t macho_extract_sections(MachOContext *ctx) {
                 strncpy(info->segname, sections[j].segname, 16);
                 info->addr = ctx->header.is_swapped ? swap_uint64(sections[j].addr) : sections[j].addr;
                 info->size = ctx->header.is_swapped ? swap_uint64(sections[j].size) : sections[j].size;
-                info->offset = ctx->header.is_swapped ? swap_uint32(sections[j].offset) : sections[j].offset;
+                info->offset = (ctx->header.is_swapped ? swap_uint32(sections[j].offset) : sections[j].offset)
+                               + (uint32_t)ctx->base_offset;
                 info->align = ctx->header.is_swapped ? swap_uint32(sections[j].align) : sections[j].align;
                 info->flags = ctx->header.is_swapped ? swap_uint32(sections[j].flags) : sections[j].flags;
 
@@ -989,7 +1046,8 @@ uint32_t macho_extract_sections(MachOContext *ctx) {
                 strncpy(info->segname, sections[j].segname, 16);
                 info->addr = ctx->header.is_swapped ? swap_uint32(sections[j].addr) : sections[j].addr;
                 info->size = ctx->header.is_swapped ? swap_uint32(sections[j].size) : sections[j].size;
-                info->offset = ctx->header.is_swapped ? swap_uint32(sections[j].offset) : sections[j].offset;
+                info->offset = (ctx->header.is_swapped ? swap_uint32(sections[j].offset) : sections[j].offset)
+                               + (uint32_t)ctx->base_offset;
                 info->align = ctx->header.is_swapped ? swap_uint32(sections[j].align) : sections[j].align;
                 info->flags = ctx->header.is_swapped ? swap_uint32(sections[j].flags) : sections[j].flags;
 
