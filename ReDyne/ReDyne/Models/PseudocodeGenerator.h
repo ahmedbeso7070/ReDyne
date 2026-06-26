@@ -244,6 +244,10 @@ typedef struct {
     bool reconstructLoops;
     bool useTypeCasting;
     int indentSize;
+    // CMP/TST state for condition reconstruction
+    char last_cmp_left[64];
+    char last_cmp_right[64];
+    bool has_pending_cmp;
 } PseudocodeContext;
 
 // MARK: - Configuration & Output

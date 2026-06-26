@@ -197,6 +197,8 @@ typedef NS_ENUM(NSInteger, ReDyneBinaryParserError) {
 
         for (uint32_t i = 0; i < macho_ctx->segment_count; i++) {
             SegmentInfo *seg = &macho_ctx->segments[i];
+            // __TEXT strings were already covered by cstring/objc section extraction above
+            if (strncmp(seg->segname, "__TEXT", 16) == 0) continue;
             if ((seg->initprot & 0x01) && seg->filesize > 0) {
                 uint8_t *data = malloc(seg->filesize);
                 if (data) {

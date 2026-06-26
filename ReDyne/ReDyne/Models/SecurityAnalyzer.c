@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <mach-o/loader.h>
+#include "SymbolTable.h"
 
 #define MAX_DANGEROUS_APIS 1000
 #define MAX_INSECURE_FUNCTIONS 1000
@@ -16,16 +17,15 @@ static void safe_strncpy(char *dst, const char *src, size_t size) {
 
 // MARK: - Helper: Check If Symbol Exists
 
+// ponytail: uses sorted binary search — caller must sort before analysis
 static bool symbol_exists(SymbolTableContext *sym_ctx, const char *name) {
     if (!sym_ctx || !name) return false;
-    return symbol_table_find_by_name(sym_ctx, name) >= 0;
+    return symbol_table_find_by_name_sorted(sym_ctx, name) >= 0;
 }
-
-// MARK: - Helper: Check If Symbol Is Imported (Undefined)
 
 static bool symbol_is_imported(SymbolTableContext *sym_ctx, const char *name) {
     if (!sym_ctx || !name) return false;
-    int32_t idx = symbol_table_find_by_name(sym_ctx, name);
+    int32_t idx = symbol_table_find_by_name_sorted(sym_ctx, name);
     if (idx < 0 || (uint32_t)idx >= sym_ctx->symbol_count) return false;
     return sym_ctx->symbols[idx].type == SYMBOL_TYPE_UNDEFINED;
 }
@@ -531,6 +531,9 @@ SecurityAnalysisResult* security_analyze(MachOContext *ctx,
                                          EntitlementsInfo *ent_info) {
     SecurityAnalysisResult *result = (SecurityAnalysisResult *)calloc(1, sizeof(SecurityAnalysisResult));
     if (!result) return NULL;
+
+    /* Sort once so all symbol lookups below can use O(log n) binary search */
+    if (sym_ctx) symbol_table_sort_by_name(sym_ctx);
 
     /* Allocate arrays for dynamic findings */
     result->dangerous_apis = (DangerousAPIEntry *)calloc(MAX_DANGEROUS_APIS, sizeof(DangerousAPIEntry));

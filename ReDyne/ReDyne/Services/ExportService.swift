@@ -55,78 +55,78 @@ class ExportService {
     // MARK: - Text Export
     
     private static func exportAsText(_ output: DecompiledOutput) -> Data? {
-        var text = ""
+        var parts: [String] = []
         
-        text += "═══════════════════════════════════════════════════════════════\n"
-        text += "  ReDyne Decompilation Report\n"
-        text += "═══════════════════════════════════════════════════════════════\n\n"
+        parts.append("═══════════════════════════════════════════════════════════════\n")
+        parts.append("  ReDyne Decompilation Report\n")
+        parts.append("═══════════════════════════════════════════════════════════════\n\n")
         
-        text += "File: \(output.fileName)\n"
-        text += "Size: \(Constants.formatBytes(Int64(output.fileSize)))\n"
-        text += "Analyzed: \(DateFormatter.reportDateFormatter.string(from: output.processingDate))\n"
-        text += "Processing Time: \(Constants.formatDuration(output.processingTime))\n\n"
+        parts.append("File: \(output.fileName)\n")
+        parts.append("Size: \(Constants.formatBytes(Int64(output.fileSize)))\n")
+        parts.append("Analyzed: \(DateFormatter.reportDateFormatter.string(from: output.processingDate))\n")
+        parts.append("Processing Time: \(Constants.formatDuration(output.processingTime))\n\n")
         
-        text += "───────────────────────────────────────────────────────────────\n"
-        text += "MACH-O HEADER\n"
-        text += "───────────────────────────────────────────────────────────────\n\n"
-        text += "CPU Type: \(output.header.cpuType)\n"
-        text += "File Type: \(output.header.fileType)\n"
-        text += "Architecture: \(output.header.is64Bit ? "64-bit" : "32-bit")\n"
-        text += "Load Commands: \(output.header.ncmds)\n"
-        text += "Flags: 0x\(String(format: "%X", output.header.flags))\n"
+        parts.append("───────────────────────────────────────────────────────────────\n")
+        parts.append("MACH-O HEADER\n")
+        parts.append("───────────────────────────────────────────────────────────────\n\n")
+        parts.append("CPU Type: \(output.header.cpuType)\n")
+        parts.append("File Type: \(output.header.fileType)\n")
+        parts.append("Architecture: \(output.header.is64Bit ? "64-bit" : "32-bit")\n")
+        parts.append("Load Commands: \(output.header.ncmds)\n")
+        parts.append("Flags: 0x\(String(format: "%X", output.header.flags))\n")
         if let uuid = output.header.uuid {
-            text += "UUID: \(uuid)\n"
+            parts.append("UUID: \(uuid)\n")
         }
-        text += "Encrypted: \(output.header.isEncrypted ? "Yes" : "No")\n\n"
+        parts.append("Encrypted: \(output.header.isEncrypted ? "Yes" : "No")\n\n")
         
-        text += "───────────────────────────────────────────────────────────────\n"
-        text += "SEGMENTS (\(output.segments.count))\n"
-        text += "───────────────────────────────────────────────────────────────\n\n"
+        parts.append("───────────────────────────────────────────────────────────────\n")
+        parts.append("SEGMENTS (\(output.segments.count))\n")
+        parts.append("───────────────────────────────────────────────────────────────\n\n")
         for segment in output.segments {
             let paddedName = segment.name.padding(toLength: 16, withPad: " ", startingAt: 0)
-            text += "\(paddedName) VM: \(Constants.formatAddress(segment.vmAddress))-\(Constants.formatAddress(segment.vmAddress + segment.vmSize))"
-            text += "  File: 0x\(String(format: "%llX", segment.fileOffset))-0x\(String(format: "%llX", segment.fileOffset + segment.fileSize))"
-            text += "  [\(segment.protection)]\n"
+            parts.append("\(paddedName) VM: \(Constants.formatAddress(segment.vmAddress))-\(Constants.formatAddress(segment.vmAddress + segment.vmSize))")
+            parts.append("  File: 0x\(String(format: "%llX", segment.fileOffset))-0x\(String(format: "%llX", segment.fileOffset + segment.fileSize))")
+            parts.append("  [\(segment.protection)]\n")
         }
-        text += "\n"
+        parts.append("\n")
         
-        text += "───────────────────────────────────────────────────────────────\n"
-        text += "STATISTICS\n"
-        text += "───────────────────────────────────────────────────────────────\n\n"
-        text += "Total Symbols: \(output.totalSymbols)\n"
-        text += "  - Defined: \(output.definedSymbols)\n"
-        text += "  - Undefined: \(output.undefinedSymbols)\n"
-        text += "Total Strings: \(output.totalStrings)\n"
-        text += "Total Instructions: \(output.totalInstructions)\n"
-        text += "Total Functions: \(output.totalFunctions)\n\n"
+        parts.append("───────────────────────────────────────────────────────────────\n")
+        parts.append("STATISTICS\n")
+        parts.append("───────────────────────────────────────────────────────────────\n\n")
+        parts.append("Total Symbols: \(output.totalSymbols)\n")
+        parts.append("  - Defined: \(output.definedSymbols)\n")
+        parts.append("  - Undefined: \(output.undefinedSymbols)\n")
+        parts.append("Total Strings: \(output.totalStrings)\n")
+        parts.append("Total Instructions: \(output.totalInstructions)\n")
+        parts.append("Total Functions: \(output.totalFunctions)\n\n")
         
         if !output.strings.isEmpty {
-            text += "───────────────────────────────────────────────────────────────\n"
-            text += "STRINGS (\(output.strings.count))\n"
-            text += "───────────────────────────────────────────────────────────────\n\n"
+            parts.append("───────────────────────────────────────────────────────────────\n")
+            parts.append("STRINGS (\(output.strings.count))\n")
+            parts.append("───────────────────────────────────────────────────────────────\n\n")
             for string in output.strings {
-                text += "\(Constants.formatAddress(string.address))  [\(string.section)]  \(string.content)\n"
+                parts.append("\(Constants.formatAddress(string.address))  [\(string.section)]  \(string.content)\n")
             }
-            text += "\n"
+            parts.append("\n")
         }
         
         if !output.symbols.isEmpty {
-            text += "───────────────────────────────────────────────────────────────\n"
-            text += "SYMBOLS (\(output.symbols.count))\n"
-            text += "───────────────────────────────────────────────────────────────\n\n"
+            parts.append("───────────────────────────────────────────────────────────────\n")
+            parts.append("SYMBOLS (\(output.symbols.count))\n")
+            parts.append("───────────────────────────────────────────────────────────────\n\n")
             let sortedSymbols = output.symbols.sortedByAddress()
             for symbol in sortedSymbols {
                 let typeStr = symbol.type.padding(toLength: 10, withPad: " ", startingAt: 0)
-                text += "\(Constants.formatAddress(symbol.address))  \(typeStr)  \(symbol.name)\n"
+                parts.append("\(Constants.formatAddress(symbol.address))  \(typeStr)  \(symbol.name)\n")
             }
-            text += "\n"
+            parts.append("\n")
         }
         
-        text += "═══════════════════════════════════════════════════════════════\n"
-        text += "End of Report - Generated by ReDyne v1.0\n"
-        text += "═══════════════════════════════════════════════════════════════\n"
+        parts.append("═══════════════════════════════════════════════════════════════\n")
+        parts.append("End of Report - Generated by ReDyne v1.0\n")
+        parts.append("═══════════════════════════════════════════════════════════════\n")
         
-        return text.data(using: .utf8)
+        return parts.joined().data(using: .utf8)
     }
     
     // MARK: - JSON Export

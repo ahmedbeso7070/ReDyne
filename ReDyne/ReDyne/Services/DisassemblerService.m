@@ -391,24 +391,26 @@ typedef NS_ENUM(NSInteger, ReDyneDisassemblerError) {
         return dot;
     }
     
+    // Build address→index map for O(1) branch target resolution
+    NSMutableDictionary<NSNumber *, NSNumber *> *addrToIdx = [NSMutableDictionary dictionaryWithCapacity:instructions.count];
+    for (NSInteger i = 0; i < instructions.count; i++) {
+        addrToIdx[@(instructions[i].address)] = @(i);
+    }
+
     NSMutableSet<NSNumber *> *blockStarts = [NSMutableSet set];
     [blockStarts addObject:@(0)];
-    
+
     for (NSInteger i = 0; i < instructions.count; i++) {
         InstructionModel *inst = instructions[i];
-        
+
         if ([inst.mnemonic hasPrefix:@"B"] && ![inst.mnemonic isEqualToString:@"BRK"]) {
             if (i + 1 < instructions.count) {
                 [blockStarts addObject:@(i + 1)];
             }
-            
+
             if (inst.hasBranchTarget) {
-                for (NSInteger j = 0; j < instructions.count; j++) {
-                    if (instructions[j].address == inst.branchTarget) {
-                        [blockStarts addObject:@(j)];
-                        break;
-                    }
-                }
+                NSNumber *targetIdx = addrToIdx[@(inst.branchTarget)];
+                if (targetIdx) [blockStarts addObject:targetIdx];
             }
         }
     }
@@ -446,32 +448,33 @@ typedef NS_ENUM(NSInteger, ReDyneDisassemblerError) {
     }
     
     [dot appendString:@"\n"];
-    
+
+    // Build once before the loop — block start address → block index
+    NSMutableDictionary<NSNumber *, NSNumber *> *blockAddrToIdx =
+        [NSMutableDictionary dictionaryWithCapacity:blocks.count];
+    for (NSInteger k = 0; k < blocks.count; k++) {
+        InstructionModel *first = [blocks[k] firstObject];
+        if (first) blockAddrToIdx[@(first.address)] = @(k);
+    }
+
     for (NSInteger i = 0; i < blocks.count; i++) {
         NSArray<InstructionModel *> *block = blocks[i];
         InstructionModel *lastInst = block.lastObject;
-        
+
         NSString *mnemonic = lastInst.mnemonic;
-        
+
         if ([mnemonic isEqualToString:@"RET"]) {
-            
+            // terminal block — no outgoing edge
         } else if ([mnemonic isEqualToString:@"B"] && lastInst.hasBranchTarget) {
-            for (NSInteger j = 0; j < blocks.count; j++) {
-                InstructionModel *targetFirst = [blocks[j] firstObject];
-                if (targetFirst.address == lastInst.branchTarget) {
-                    [dot appendFormat:@"  bb_%ld -> bb_%ld;\n", (long)i, (long)j];
-                    break;
-                }
+            NSNumber *targetBlock = blockAddrToIdx[@(lastInst.branchTarget)];
+            if (targetBlock) {
+                [dot appendFormat:@"  bb_%ld -> bb_%ld;\n", (long)i, (long)targetBlock.integerValue];
             }
         } else if ([mnemonic hasPrefix:@"B."] && lastInst.hasBranchTarget) {
-            for (NSInteger j = 0; j < blocks.count; j++) {
-                InstructionModel *targetFirst = [blocks[j] firstObject];
-                if (targetFirst.address == lastInst.branchTarget) {
-                    [dot appendFormat:@"  bb_%ld -> bb_%ld [label=\"true\", color=green];\n", (long)i, (long)j];
-                    break;
-                }
+            NSNumber *targetBlock = blockAddrToIdx[@(lastInst.branchTarget)];
+            if (targetBlock) {
+                [dot appendFormat:@"  bb_%ld -> bb_%ld [label=\"true\", color=green];\n", (long)i, (long)targetBlock.integerValue];
             }
-            
             if (i + 1 < blocks.count) {
                 [dot appendFormat:@"  bb_%ld -> bb_%ld [label=\"false\", color=red];\n", (long)i, (long)(i + 1)];
             }

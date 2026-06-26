@@ -17,8 +17,8 @@ static uint32_t find_code_signature_offset(MachOContext *ctx, uint32_t *size) {
         uint32_t cmd, cmdsize;
         long cmd_start = ftell(ctx->file);
         
-        fread(&cmd, sizeof(uint32_t), 1, ctx->file);
-        fread(&cmdsize, sizeof(uint32_t), 1, ctx->file);
+        if (fread(&cmd, sizeof(uint32_t), 1, ctx->file) != 1) return 0;
+        if (fread(&cmdsize, sizeof(uint32_t), 1, ctx->file) != 1) return 0;
         
         if (ctx->header.is_swapped) {
             cmd = __builtin_bswap32(cmd);
@@ -28,7 +28,7 @@ static uint32_t find_code_signature_offset(MachOContext *ctx, uint32_t *size) {
         if (cmd == LC_CODE_SIGNATURE) {
             struct linkedit_data_command sig_cmd;
             fseek(ctx->file, cmd_start, SEEK_SET);
-            fread(&sig_cmd, sizeof(struct linkedit_data_command), 1, ctx->file);
+            if (fread(&sig_cmd, sizeof(struct linkedit_data_command), 1, ctx->file) != 1) return 0;
             
             if (ctx->header.is_swapped) {
                 *size = __builtin_bswap32(sig_cmd.datasize);

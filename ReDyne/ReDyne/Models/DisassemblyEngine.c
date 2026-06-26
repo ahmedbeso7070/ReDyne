@@ -239,8 +239,8 @@ bool disasm_arm64(uint32_t bytes, uint64_t address, DisassembledInstruction *ins
             uint8_t rd = bytes & 0x1F;
             uint8_t rn = (bytes >> 5) & 0x1F;
             uint16_t imm12 = (bytes >> 10) & 0xFFF;
-            uint8_t shift = (bytes >> 22) & 0x3;
-            uint32_t imm = imm12 << (shift * 12);
+            // ponytail: bit22 is the shift flag (0 or 12); mask is 1 bit, not 2
+            uint32_t imm = ((bytes >> 22) & 0x1) ? ((uint32_t)imm12 << 12) : (uint32_t)imm12;
             
             strcpy(inst->mnemonic, is_sub ? "SUB" : "ADD");
             snprintf(inst->operands, sizeof(inst->operands), "%s, %s, #%u",
@@ -373,69 +373,6 @@ bool disasm_arm64(uint32_t bytes, uint64_t address, DisassembledInstruction *ins
             snprintf(inst->operands, sizeof(inst->operands), "%s, 0x%llx",
                      arm64_register_name(rt, true), target);
             inst->category = INST_CATEGORY_LOAD_STORE;
-            inst->is_valid = true;
-        }
-    }
-    
-    else if ((op0 & 0xE) == 0xA) {
-        if (((bytes >> 21) & 0xFF) >= 0x0 && ((bytes >> 21) & 0xFF) <= 0x77) {
-            uint8_t opc = (bytes >> 29) & 0x3;
-            bool is_64bit = ((bytes >> 31) & 0x1) == 1;
-            uint8_t rd = bytes & 0x1F;
-            uint8_t rn = (bytes >> 5) & 0x1F;
-            uint8_t rm = (bytes >> 16) & 0x1F;
-            bool N = ((bytes >> 21) & 0x1) == 1;
-            
-            if (opc == 0) strcpy(inst->mnemonic, N ? "BIC" : "AND");
-            else if (opc == 1) strcpy(inst->mnemonic, N ? "ORN" : "ORR");
-            else if (opc == 2) strcpy(inst->mnemonic, N ? "EON" : "EOR");
-            else strcpy(inst->mnemonic, N ? "BICS" : "ANDS");
-            
-            if (!N && opc == 1 && rn == 31) {
-                strcpy(inst->mnemonic, "MOV");
-                snprintf(inst->operands, sizeof(inst->operands), "%s, %s",
-                         arm64_register_name(rd, is_64bit),
-                         arm64_register_name(rm, is_64bit));
-            } else {
-                snprintf(inst->operands, sizeof(inst->operands), "%s, %s, %s",
-                         arm64_register_name(rd, is_64bit),
-                         arm64_register_name(rn, is_64bit),
-                         arm64_register_name(rm, is_64bit));
-            }
-            inst->category = INST_CATEGORY_DATA_PROCESSING;
-            inst->is_valid = true;
-        }
-        
-        else if (((bytes >> 21) & 0xFF) >= 0x1B && ((bytes >> 21) & 0xFF) <= 0x1F) {
-            bool is_64bit = ((bytes >> 31) & 0x1) == 1;
-            uint8_t rd = bytes & 0x1F;
-            uint8_t rn = (bytes >> 5) & 0x1F;
-            uint8_t rm = (bytes >> 16) & 0x1F;
-            uint8_t ra = (bytes >> 10) & 0x1F;
-            uint8_t op = (bytes >> 21) & 0x7;
-            
-            if (op == 0x0) strcpy(inst->mnemonic, "MADD");
-            else if (op == 0x1) strcpy(inst->mnemonic, "MSUB");
-            else if (op == 0x2) strcpy(inst->mnemonic, "SMULL");
-            else if (op == 0x3) strcpy(inst->mnemonic, "SMULH");
-            else if (op == 0x2) strcpy(inst->mnemonic, "UDIV");
-            else if (op == 0x3) strcpy(inst->mnemonic, "SDIV");
-            else strcpy(inst->mnemonic, "MUL");
-            
-            if (ra == 31 && op == 0x0) {
-                strcpy(inst->mnemonic, "MUL");
-                snprintf(inst->operands, sizeof(inst->operands), "%s, %s, %s",
-                         arm64_register_name(rd, is_64bit),
-                         arm64_register_name(rn, is_64bit),
-                         arm64_register_name(rm, is_64bit));
-            } else {
-                snprintf(inst->operands, sizeof(inst->operands), "%s, %s, %s, %s",
-                         arm64_register_name(rd, is_64bit),
-                         arm64_register_name(rn, is_64bit),
-                         arm64_register_name(rm, is_64bit),
-                         arm64_register_name(ra, is_64bit));
-            }
-            inst->category = INST_CATEGORY_DATA_PROCESSING;
             inst->is_valid = true;
         }
     }
@@ -733,7 +670,7 @@ bool disasm_x86_64(const uint8_t *bytes, uint64_t address, DisassembledInstructi
     else if (opcode == 0xC2) {
         strcpy(inst->mnemonic, "RET");
         if (pos + 2 <= 15) {
-            uint16_t imm = *(uint16_t*)&bytes[pos];
+            uint16_t imm; memcpy(&imm, &bytes[pos], sizeof(imm));
             snprintf(inst->operands, sizeof(inst->operands), "0x%x", imm);
             inst->length = pos + 2;
         }
@@ -841,7 +778,7 @@ bool disasm_x86_64(const uint8_t *bytes, uint64_t address, DisassembledInstructi
     else if (opcode == 0xE9) {
         strcpy(inst->mnemonic, "JMP");
         if (pos + 4 <= 15) {
-            int32_t offset = *(int32_t*)&bytes[pos];
+            int32_t offset; memcpy(&offset, &bytes[pos], sizeof(offset));
             inst->branch_target = address + pos + 4 + offset;
             inst->has_branch_target = true;
             inst->has_branch = true;
@@ -873,7 +810,7 @@ bool disasm_x86_64(const uint8_t *bytes, uint64_t address, DisassembledInstructi
     else if (opcode == 0xE8) {
         strcpy(inst->mnemonic, "CALL");
         if (pos + 4 <= 15) {
-            int32_t offset = *(int32_t*)&bytes[pos];
+            int32_t offset; memcpy(&offset, &bytes[pos], sizeof(offset));
             inst->branch_target = address + pos + 4 + offset;
             inst->has_branch_target = true;
             inst->has_branch = true;
@@ -919,7 +856,7 @@ bool disasm_x86_64(const uint8_t *bytes, uint64_t address, DisassembledInstructi
                 "JS", "JNS", "JP", "JNP", "JL", "JNL", "JLE", "JNLE"
             };
             strcpy(inst->mnemonic, cond[opcode2 - 0x80]);
-            int32_t offset = *(int32_t*)&bytes[2];
+            int32_t offset; memcpy(&offset, &bytes[2], sizeof(offset));
             inst->branch_target = address + 6 + offset;
             inst->has_branch_target = true;
             inst->has_branch = true;
@@ -960,7 +897,7 @@ bool disasm_x86_64(const uint8_t *bytes, uint64_t address, DisassembledInstructi
     else if (opcode >= 0xB8 && opcode <= 0xBF) {
         strcpy(inst->mnemonic, "MOV");
         const char *regs[] = {"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"};
-        uint32_t imm = *(uint32_t*)&bytes[1];
+        uint32_t imm; memcpy(&imm, &bytes[1], sizeof(imm));
         snprintf(inst->operands, sizeof(inst->operands), "%s, 0x%08X", regs[opcode - 0xB8], imm);
         inst->category = INST_CATEGORY_DATA_PROCESSING;
         inst->is_valid = true;
@@ -1079,9 +1016,14 @@ uint32_t disasm_all(DisassemblyContext *ctx) {
     while (ctx->current_offset < ctx->code_size) {
         if (ctx->instruction_count >= ctx->instruction_capacity) {
             ctx->instruction_capacity *= 2;
-            ctx->instructions = (DisassembledInstruction*)realloc(ctx->instructions,
-                                                                   ctx->instruction_capacity * sizeof(DisassembledInstruction));
-            if (!ctx->instructions) return 0;
+            DisassembledInstruction *new_ptr = (DisassembledInstruction*)realloc(
+                ctx->instructions,
+                ctx->instruction_capacity * sizeof(DisassembledInstruction)
+            );
+            if (!new_ptr) {
+                return ctx->instruction_count;
+            }
+            ctx->instructions = new_ptr;
         }
         
         if (!disasm_instruction(ctx, &ctx->instructions[ctx->instruction_count])) {
@@ -1107,14 +1049,15 @@ uint32_t disasm_detect_functions(DisassemblyContext *ctx) {
 }
 
 int32_t disasm_find_by_address(DisassemblyContext *ctx, uint64_t address) {
-    if (!ctx || !ctx->instructions) return -1;
-    
-    for (uint32_t i = 0; i < ctx->instruction_count; i++) {
-        if (ctx->instructions[i].address == address) {
-            return (int32_t)i;
-        }
+    if (!ctx || !ctx->instructions || ctx->instruction_count == 0) return -1;
+    // ponytail: binary search — instructions are in ascending address order
+    int32_t lo = 0, hi = (int32_t)ctx->instruction_count - 1;
+    while (lo <= hi) {
+        int32_t mid = lo + (hi - lo) / 2;
+        if (ctx->instructions[mid].address == address) return mid;
+        if (ctx->instructions[mid].address < address) lo = mid + 1;
+        else hi = mid - 1;
     }
-    
     return -1;
 }
 

@@ -509,15 +509,45 @@ class XrefAnalyzer {
     private static func buildFunctionXrefs(allXrefs: [CrossReference], symbols: [SymbolInfo], symbolTable: [UInt64: SymbolInfo]) -> [String: FunctionXrefs] {
         var result: [String: FunctionXrefs] = [:]
         
+        // Build address-indexed maps for O(1) xref lookups instead of O(n) filtering per symbol
+        var xrefsToByAddress: [UInt64: [CrossReference]] = [:]
+        var xrefsFromByAddress: [UInt64: [CrossReference]] = [:]
+        for xref in allXrefs {
+            xrefsToByAddress[xref.toAddress, default: []].append(xref)
+            xrefsFromByAddress[xref.fromAddress, default: []].append(xref)
+        }
+        
+        let sortedToKeys = xrefsToByAddress.keys.sorted()
+        let sortedFromKeys = xrefsFromByAddress.keys.sorted()
+        
         for symbol in symbols where symbol.isFunction {
             let address = symbol.address
+            let endAddress = address + symbol.size
             let key = String(format: "0x%llX", address)
-            let xrefsTo = allXrefs.filter { xref in
-                xref.toAddress == address || (xref.toAddress >= address && xref.toAddress < address + symbol.size)
+            
+            var xrefsTo: [CrossReference] = []
+            // Exact address match
+            if let exact = xrefsToByAddress[address] {
+                xrefsTo.append(contentsOf: exact)
+            }
+            // Range match via binary search for start index
+            let rangeStartIdx = binarySearchLowerBound(sortedToKeys, value: address)
+            for idx in rangeStartIdx..<sortedToKeys.count {
+                let addr = sortedToKeys[idx]
+                if addr >= endAddress { break }
+                if addr != address, let refs = xrefsToByAddress[addr] {
+                    xrefsTo.append(contentsOf: refs)
+                }
             }
             
-            let xrefsFrom = allXrefs.filter { xref in
-                xref.fromAddress >= address && xref.fromAddress < address + symbol.size
+            var xrefsFrom: [CrossReference] = []
+            let fromStartIdx = binarySearchLowerBound(sortedFromKeys, value: address)
+            for idx in fromStartIdx..<sortedFromKeys.count {
+                let addr = sortedFromKeys[idx]
+                if addr >= endAddress { break }
+                if let refs = xrefsFromByAddress[addr] {
+                    xrefsFrom.append(contentsOf: refs)
+                }
             }
             
             if !xrefsTo.isEmpty || !xrefsFrom.isEmpty {
@@ -531,6 +561,15 @@ class XrefAnalyzer {
         }
         
         return result
+    }
+    
+    private static func binarySearchLowerBound(_ keys: [UInt64], value: UInt64) -> Int {
+        var lo = 0, hi = keys.count
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2
+            if keys[mid] < value { lo = mid + 1 } else { hi = mid }
+        }
+        return lo
     }
 }
 

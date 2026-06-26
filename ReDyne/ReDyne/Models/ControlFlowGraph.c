@@ -95,11 +95,23 @@ bool cfg_add_edge(BasicBlock *from, BasicBlock *to, EdgeType edge_type) {
 }
 
 BasicBlock* cfg_find_block(CFGContext *ctx, uint64_t address) {
-    if (!ctx || !ctx->blocks) return NULL;
+    if (!ctx || !ctx->blocks || ctx->block_count == 0) return NULL;
     
-    for (uint32_t i = 0; i < ctx->block_count; i++) {
-        if (address >= ctx->blocks[i].start_address && address < ctx->blocks[i].end_address) {
-            return &ctx->blocks[i];
+    // Blocks are added in order, so binary search by start_address
+    uint32_t lo = 0, hi = ctx->block_count;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (ctx->blocks[mid].start_address <= address) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    
+    if (lo > 0) {
+        BasicBlock *block = &ctx->blocks[lo - 1];
+        if (address >= block->start_address && address < block->end_address) {
+            return block;
         }
     }
     

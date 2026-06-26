@@ -374,7 +374,7 @@ MachOContext* macho_open(const char *filepath, char *error_msg) {
     }
     
     if (ctx->file_size > MAX_FILE_SIZE) {
-        if (error_msg) sprintf(error_msg, "File too large: %ld bytes (max: %d MB)", ctx->file_size, MAX_FILE_SIZE / (1024 * 1024));
+        if (error_msg) snprintf(error_msg, 256, "File too large: %ld bytes (max: %d MB)", ctx->file_size, MAX_FILE_SIZE / (1024 * 1024));
         fclose(ctx->file);
         free(ctx);
         return NULL;
@@ -403,7 +403,7 @@ MachOContext* macho_open(const char *filepath, char *error_msg) {
             }
         } else {
             if (error_msg) {
-                sprintf(error_msg, "Invalid magic number: 0x%08X (%s)\nExpected Mach-O or Universal Binary format",
+                snprintf(error_msg, 256, "Invalid magic number: 0x%08X (%s)\nExpected Mach-O or Universal Binary format",
                         magic, macho_magic_string(magic));
             }
         }
@@ -680,15 +680,15 @@ bool macho_parse_load_commands(MachOContext *ctx) {
             case LC_SYMTAB: {
                 struct symtab_command *symtab = (struct symtab_command*)ctx->load_commands[i].data;
                 ctx->symtab_offset = (ctx->header.is_swapped ? swap_uint32(symtab->symoff) : symtab->symoff)
-                                     + (uint32_t)ctx->base_offset;
+                                     + ctx->base_offset;
                 ctx->nsyms = ctx->header.is_swapped ? swap_uint32(symtab->nsyms) : symtab->nsyms;
                 ctx->stroff = (ctx->header.is_swapped ? swap_uint32(symtab->stroff) : symtab->stroff)
-                              + (uint32_t)ctx->base_offset;
+                              + ctx->base_offset;
                 ctx->strsize = ctx->header.is_swapped ? swap_uint32(symtab->strsize) : symtab->strsize;
                 break;
             }
             case LC_DYSYMTAB: {
-                ctx->dysymtab_offset = (uint32_t)cmd_offset;
+                ctx->dysymtab_offset = (uint64_t)cmd_offset;
                 break;
             }
             case LC_DYLD_INFO:
@@ -696,19 +696,19 @@ bool macho_parse_load_commands(MachOContext *ctx) {
                 struct dyld_info_command *dyld = (struct dyld_info_command*)ctx->load_commands[i].data;
                 ctx->has_dyld_info = true;
                 ctx->rebase_off = (ctx->header.is_swapped ? swap_uint32(dyld->rebase_off) : dyld->rebase_off)
-                                  + (uint32_t)ctx->base_offset;
+                                  + ctx->base_offset;
                 ctx->rebase_size = ctx->header.is_swapped ? swap_uint32(dyld->rebase_size) : dyld->rebase_size;
                 ctx->bind_off = (ctx->header.is_swapped ? swap_uint32(dyld->bind_off) : dyld->bind_off)
-                                + (uint32_t)ctx->base_offset;
+                                + ctx->base_offset;
                 ctx->bind_size = ctx->header.is_swapped ? swap_uint32(dyld->bind_size) : dyld->bind_size;
                 ctx->weak_bind_off = (ctx->header.is_swapped ? swap_uint32(dyld->weak_bind_off) : dyld->weak_bind_off)
-                                     + (uint32_t)ctx->base_offset;
+                                     + ctx->base_offset;
                 ctx->weak_bind_size = ctx->header.is_swapped ? swap_uint32(dyld->weak_bind_size) : dyld->weak_bind_size;
                 ctx->lazy_bind_off = (ctx->header.is_swapped ? swap_uint32(dyld->lazy_bind_off) : dyld->lazy_bind_off)
-                                     + (uint32_t)ctx->base_offset;
+                                     + ctx->base_offset;
                 ctx->lazy_bind_size = ctx->header.is_swapped ? swap_uint32(dyld->lazy_bind_size) : dyld->lazy_bind_size;
                 ctx->export_off = (ctx->header.is_swapped ? swap_uint32(dyld->export_off) : dyld->export_off)
-                                  + (uint32_t)ctx->base_offset;
+                                  + ctx->base_offset;
                 ctx->export_size = ctx->header.is_swapped ? swap_uint32(dyld->export_size) : dyld->export_size;
                 break;
             }
@@ -718,7 +718,7 @@ bool macho_parse_load_commands(MachOContext *ctx) {
                 ctx->cryptid = ctx->header.is_swapped ? swap_uint32(enc->cryptid) : enc->cryptid;
                 ctx->is_encrypted = (ctx->cryptid != 0);
                 ctx->cryptoff = (ctx->header.is_swapped ? swap_uint32(enc->cryptoff) : enc->cryptoff)
-                                + (uint32_t)ctx->base_offset;
+                                + ctx->base_offset;
                 ctx->cryptsize = ctx->header.is_swapped ? swap_uint32(enc->cryptsize) : enc->cryptsize;
                 break;
             }
@@ -738,7 +738,7 @@ bool macho_parse_load_commands(MachOContext *ctx) {
                 struct linkedit_data_command *ldc = (struct linkedit_data_command*)ctx->load_commands[i].data;
                 ctx->has_function_starts = true;
                 ctx->function_starts_offset = (ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff)
-                                              + (uint32_t)ctx->base_offset;
+                                              + ctx->base_offset;
                 ctx->function_starts_size = ctx->header.is_swapped ? swap_uint32(ldc->datasize) : ldc->datasize;
                 break;
             }
@@ -746,7 +746,7 @@ bool macho_parse_load_commands(MachOContext *ctx) {
                 struct linkedit_data_command *ldc = (struct linkedit_data_command*)ctx->load_commands[i].data;
                 ctx->has_data_in_code = true;
                 ctx->data_in_code_offset = (ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff)
-                                           + (uint32_t)ctx->base_offset;
+                                           + ctx->base_offset;
                 ctx->data_in_code_size = ctx->header.is_swapped ? swap_uint32(ldc->datasize) : ldc->datasize;
                 break;
             }
@@ -754,7 +754,7 @@ bool macho_parse_load_commands(MachOContext *ctx) {
                 struct linkedit_data_command *ldc = (struct linkedit_data_command*)ctx->load_commands[i].data;
                 ctx->has_chained_fixups = true;
                 ctx->chained_fixups_offset = (ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff)
-                                             + (uint32_t)ctx->base_offset;
+                                             + ctx->base_offset;
                 ctx->chained_fixups_size = ctx->header.is_swapped ? swap_uint32(ldc->datasize) : ldc->datasize;
                 break;
             }
@@ -762,7 +762,7 @@ bool macho_parse_load_commands(MachOContext *ctx) {
                 struct linkedit_data_command *ldc = (struct linkedit_data_command*)ctx->load_commands[i].data;
                 ctx->has_exports_trie = true;
                 ctx->exports_trie_offset = (ctx->header.is_swapped ? swap_uint32(ldc->dataoff) : ldc->dataoff)
-                                           + (uint32_t)ctx->base_offset;
+                                           + ctx->base_offset;
                 ctx->exports_trie_size = ctx->header.is_swapped ? swap_uint32(ldc->datasize) : ldc->datasize;
                 break;
             }
@@ -1014,7 +1014,7 @@ uint32_t macho_extract_sections(MachOContext *ctx) {
                 info->addr = ctx->header.is_swapped ? swap_uint64(sections[j].addr) : sections[j].addr;
                 info->size = ctx->header.is_swapped ? swap_uint64(sections[j].size) : sections[j].size;
                 info->offset = (ctx->header.is_swapped ? swap_uint32(sections[j].offset) : sections[j].offset)
-                               + (uint32_t)ctx->base_offset;
+                               + ctx->base_offset;
                 info->align = ctx->header.is_swapped ? swap_uint32(sections[j].align) : sections[j].align;
                 info->flags = ctx->header.is_swapped ? swap_uint32(sections[j].flags) : sections[j].flags;
 
@@ -1047,7 +1047,7 @@ uint32_t macho_extract_sections(MachOContext *ctx) {
                 info->addr = ctx->header.is_swapped ? swap_uint32(sections[j].addr) : sections[j].addr;
                 info->size = ctx->header.is_swapped ? swap_uint32(sections[j].size) : sections[j].size;
                 info->offset = (ctx->header.is_swapped ? swap_uint32(sections[j].offset) : sections[j].offset)
-                               + (uint32_t)ctx->base_offset;
+                               + ctx->base_offset;
                 info->align = ctx->header.is_swapped ? swap_uint32(sections[j].align) : sections[j].align;
                 info->flags = ctx->header.is_swapped ? swap_uint32(sections[j].flags) : sections[j].flags;
 

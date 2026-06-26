@@ -121,9 +121,17 @@ bool symbol_table_parse(SymbolTableContext *ctx) {
     fseek(mctx->file, mctx->symtab_offset, SEEK_SET);
 
     if (mctx->header.is_64bit) {
+        // Bulk read all symbols at once
+        struct nlist_64 *nlist_buf = (struct nlist_64*)calloc(ctx->symbol_count, sizeof(struct nlist_64));
+        if (!nlist_buf) return false;
+        
+        if (fread(nlist_buf, sizeof(struct nlist_64), ctx->symbol_count, mctx->file) != ctx->symbol_count) {
+            free(nlist_buf);
+            return false;
+        }
+        
         for (uint32_t i = 0; i < ctx->symbol_count; i++) {
-            struct nlist_64 nlist;
-            if (fread(&nlist, sizeof(struct nlist_64), 1, mctx->file) != 1) return false;
+            struct nlist_64 nlist = nlist_buf[i];
             
             if (mctx->header.is_swapped) {
                 nlist.n_un.n_strx = swap_uint32(nlist.n_un.n_strx);
@@ -175,6 +183,7 @@ bool symbol_table_parse(SymbolTableContext *ctx) {
             }
             sym->size = 0;
         }
+        free(nlist_buf);
     } else {
         for (uint32_t i = 0; i < ctx->symbol_count; i++) {
             struct nlist nlist;
@@ -294,13 +303,26 @@ uint32_t symbol_table_extract_functions(SymbolTableContext *ctx) {
 
 int32_t symbol_table_find_by_name(SymbolTableContext *ctx, const char *name) {
     if (!ctx || !ctx->symbols || !name) return -1;
-    
     for (uint32_t i = 0; i < ctx->symbol_count; i++) {
         if (ctx->symbols[i].name && strcmp(ctx->symbols[i].name, name) == 0) {
             return (int32_t)i;
         }
     }
-    
+    return -1;
+}
+
+// ponytail: O(log n) variant — requires prior symbol_table_sort_by_name call
+int32_t symbol_table_find_by_name_sorted(SymbolTableContext *ctx, const char *name) {
+    if (!ctx || !ctx->symbols || !name) return -1;
+    int32_t lo = 0, hi = (int32_t)ctx->symbol_count - 1;
+    while (lo <= hi) {
+        int32_t mid = lo + (hi - lo) / 2;
+        const char *sym_name = ctx->symbols[mid].name ? ctx->symbols[mid].name : "";
+        int cmp = strcmp(sym_name, name);
+        if (cmp == 0) return mid;
+        if (cmp < 0) lo = mid + 1;
+        else hi = mid - 1;
+    }
     return -1;
 }
 

@@ -5,6 +5,182 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <mach-o/loader.h>
+#include <mach-o/fat.h>
+
+// MARK: - ObjC Runtime Layout (64-bit, matches libobjc ABI)
+
+typedef struct { uint64_t metaclass, superclass, cache, vtable, roPtr; } ObjcClass64;
+typedef struct {
+    uint32_t flags, instanceStart, instanceSize, reserved;
+    uint64_t ivarLayout, namePtr, methods, protocols, ivars, weakLayout, properties;
+} ObjcClassRO64;
+typedef struct { uint32_t flagsAndCount, count; } ObjcListHdr;
+typedef struct { uint64_t namePtr, typesPtr, imp; } ObjcBigMethod64;
+typedef struct { int32_t nameRelOff, typesRelOff, impRelOff; } ObjcSmallMethod64;
+typedef struct { uint64_t namePtr, attrPtr; } ObjcProperty64;
+typedef struct { uint64_t offsetPtr, namePtr, typesPtr; uint32_t alignment, size; } ObjcIvar64;
+typedef struct {
+    uint64_t isa, namePtr, protocols, instMethods, classMethods,
+             optInstMethods, optClassMethods, instProps;
+} ObjcProtocol64;
+typedef struct { uint64_t namePtr, cls, instMethods, classMethods, protocols, instProps; } ObjcCategory64;
+
+#define OBJC_METHOD_LIST_IS_SMALL 0x80000000u
+// Strip PAC/TBI pointer tags (arm64e)
+#define PAC_MASK 0x0000FFFFFFFFFFFFull
+
+// MARK: - Segment VA-to-File Helpers
+
+typedef struct { uint64_t vmaddr, vmsize, fileoff; } SegEntry;
+#define SEGTABLE_MAX 32
+
+static const char* seg_resolve(const char* base, size_t sz,
+                                const SegEntry* t, uint32_t n, uint64_t va) {
+    va &= PAC_MASK;
+    for (uint32_t i = 0; i < n; i++) {
+        if (va >= t[i].vmaddr && va < t[i].vmaddr + t[i].vmsize) {
+            uint64_t off = t[i].fileoff + (va - t[i].vmaddr);
+            if (off < sz) return base + off;
+        }
+    }
+    return NULL;
+}
+
+static char* cstr_at_va(const char* base, size_t sz,
+                         const SegEntry* segs, uint32_t n, uint64_t va) {
+    const char* p = seg_resolve(base, sz, segs, n, va);
+    if (!p) return NULL;
+    size_t avail = sz - (size_t)(p - base);
+    size_t maxLen = avail < 512 ? avail : 512;
+    size_t len = strnlen(p, maxLen);
+    if (len == 0 || len >= maxLen) return NULL;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)p[i];
+        if (c < 0x20 || c > 0x7E) return NULL;
+    }
+    return strndup(p, len);
+}
+
+// MARK: - List Parsers
+
+static void parse_methods(const char* base, size_t sz, const SegEntry* segs, uint32_t segn,
+                           uint64_t methodsVA,
+                           char*** outMethods, uint32_t* outCount) {
+    *outMethods = NULL; *outCount = 0;
+    if (!methodsVA) return;
+    const char* p = seg_resolve(base, sz, segs, segn, methodsVA);
+    if (!p || (size_t)(p - base) + sizeof(ObjcListHdr) > sz) return;
+
+    ObjcListHdr hdr; memcpy(&hdr, p, sizeof(hdr));
+    uint32_t count = hdr.count;
+    if (count == 0 || count > 8192) return;
+    bool isSmall = (hdr.flagsAndCount & OBJC_METHOD_LIST_IS_SMALL) != 0;
+    size_t entrySize = isSmall ? sizeof(ObjcSmallMethod64) : sizeof(ObjcBigMethod64);
+
+    char** names = malloc(sizeof(char*) * count);
+    if (!names) return;
+    uint32_t found = 0;
+
+    for (uint32_t i = 0; i < count; i++) {
+        size_t entryFileOff = (size_t)(p - base) + sizeof(ObjcListHdr) + i * entrySize;
+        if (entryFileOff + entrySize > sz) break;
+        char* name = NULL;
+
+        if (isSmall) {
+            int32_t relOff; memcpy(&relOff, base + entryFileOff, 4);
+            // nameRelOff: signed offset from &field to a pointer-sized selector ref slot
+            uint64_t refVA = (methodsVA + sizeof(ObjcListHdr) + i * sizeof(ObjcSmallMethod64))
+                             + (uint64_t)(int64_t)relOff;
+            const char* refPtr = seg_resolve(base, sz, segs, segn, refVA);
+            if (refPtr && (size_t)(refPtr - base) + 8 <= sz) {
+                uint64_t nameVA; memcpy(&nameVA, refPtr, 8);
+                name = cstr_at_va(base, sz, segs, segn, nameVA);
+            }
+        } else {
+            uint64_t nameVA; memcpy(&nameVA, base + entryFileOff, 8);
+            name = cstr_at_va(base, sz, segs, segn, nameVA);
+        }
+
+        names[found++] = name ? name : strdup("<unknown>");
+    }
+    *outMethods = names; *outCount = found;
+}
+
+static void parse_properties(const char* base, size_t sz, const SegEntry* segs, uint32_t segn,
+                              uint64_t propsVA, char*** outProps, uint32_t* outCount) {
+    *outProps = NULL; *outCount = 0;
+    if (!propsVA) return;
+    const char* p = seg_resolve(base, sz, segs, segn, propsVA);
+    if (!p || (size_t)(p - base) + sizeof(ObjcListHdr) > sz) return;
+
+    ObjcListHdr hdr; memcpy(&hdr, p, sizeof(hdr));
+    uint32_t count = hdr.count;
+    if (count == 0 || count > 4096) return;
+
+    char** names = malloc(sizeof(char*) * count);
+    if (!names) return;
+    uint32_t found = 0;
+
+    for (uint32_t i = 0; i < count; i++) {
+        size_t entryOff = (size_t)(p - base) + sizeof(ObjcListHdr) + i * sizeof(ObjcProperty64);
+        if (entryOff + sizeof(ObjcProperty64) > sz) break;
+        ObjcProperty64 prop; memcpy(&prop, base + entryOff, sizeof(prop));
+        char* name = cstr_at_va(base, sz, segs, segn, prop.namePtr);
+        names[found++] = name ? name : strdup("<unknown>");
+    }
+    *outProps = names; *outCount = found;
+}
+
+static void parse_ivars(const char* base, size_t sz, const SegEntry* segs, uint32_t segn,
+                         uint64_t ivarsVA, char*** outIvars, uint32_t* outCount) {
+    *outIvars = NULL; *outCount = 0;
+    if (!ivarsVA) return;
+    const char* p = seg_resolve(base, sz, segs, segn, ivarsVA);
+    if (!p || (size_t)(p - base) + sizeof(ObjcListHdr) > sz) return;
+
+    ObjcListHdr hdr; memcpy(&hdr, p, sizeof(hdr));
+    uint32_t count = hdr.count;
+    if (count == 0 || count > 4096) return;
+
+    char** names = malloc(sizeof(char*) * count);
+    if (!names) return;
+    uint32_t found = 0;
+
+    for (uint32_t i = 0; i < count; i++) {
+        size_t entryOff = (size_t)(p - base) + sizeof(ObjcListHdr) + i * sizeof(ObjcIvar64);
+        if (entryOff + sizeof(ObjcIvar64) > sz) break;
+        ObjcIvar64 ivar; memcpy(&ivar, base + entryOff, sizeof(ivar));
+        char* name = cstr_at_va(base, sz, segs, segn, ivar.namePtr);
+        names[found++] = name ? name : strdup("<unknown>");
+    }
+    *outIvars = names; *outCount = found;
+}
+
+// Build segment table from the start of a 64-bit Mach-O slice
+static uint32_t build_seg_table(const char* machBase, size_t remaining, SegEntry* out) {
+    if (remaining < sizeof(struct mach_header_64)) return 0;
+    const struct mach_header_64* mh = (const struct mach_header_64*)machBase;
+    if (mh->magic != MH_MAGIC_64) return 0;
+
+    uint32_t n = 0;
+    const char* lc = machBase + sizeof(struct mach_header_64);
+    for (uint32_t i = 0; i < mh->ncmds && n < SEGTABLE_MAX; i++) {
+        if ((size_t)(lc - machBase) + sizeof(struct load_command) > remaining) break;
+        const struct load_command* cmd = (const struct load_command*)lc;
+        if (cmd->cmdsize == 0) break;
+        if (cmd->cmd == LC_SEGMENT_64 &&
+            (size_t)(lc - machBase) + sizeof(struct segment_command_64) <= remaining) {
+            const struct segment_command_64* sc = (const struct segment_command_64*)lc;
+            out[n].vmaddr  = sc->vmaddr;
+            out[n].vmsize  = sc->vmsize;
+            out[n].fileoff = sc->fileoff;
+            n++;
+        }
+        lc += cmd->cmdsize;
+    }
+    return n;
+}
 
 // MARK: - Main Class Dump Function
 
@@ -119,121 +295,342 @@ void analyze_symbol_table_for_objc(const char* binaryData, size_t binarySize, cl
 }
 
 void analyze_objc_runtime_sections(const char* binaryData, size_t binarySize, class_dump_result_t* result) {
-    
-    // someone pr full Mach-O parsing i'm lazy
-    analyze_symbol_table_for_objc(binaryData, binarySize, result);
+    if (!binaryData || binarySize < sizeof(struct mach_header_64) || !result) return;
+
+    // Locate the arm64/arm64e Mach-O slice (handle fat binaries)
+    const char* machBase = binaryData;
+    if (binarySize >= sizeof(struct fat_header)) {
+        const struct fat_header* fat = (const struct fat_header*)binaryData;
+        uint32_t fatMagic = OSSwapBigToHostInt32(fat->magic);
+        if (fatMagic == FAT_MAGIC || fatMagic == FAT_CIGAM) {
+            uint32_t narch = OSSwapBigToHostInt32(fat->nfat_arch);
+            const struct fat_arch* arches = (const struct fat_arch*)(fat + 1);
+            for (uint32_t i = 0; i < narch; i++) {
+                cpu_type_t ct = OSSwapBigToHostInt32(arches[i].cputype);
+                if (ct == CPU_TYPE_ARM64) {
+                    uint32_t sliceOff = OSSwapBigToHostInt32(arches[i].offset);
+                    if (sliceOff < binarySize) { machBase = binaryData + sliceOff; break; }
+                }
+            }
+        }
+    }
+
+    const struct mach_header_64* mh = (const struct mach_header_64*)machBase;
+    if (mh->magic != MH_MAGIC_64) {
+        // Fall back to symbol table scan if not 64-bit
+        analyze_symbol_table_for_objc(binaryData, binarySize, result);
+        return;
+    }
+
+    SegEntry segs[SEGTABLE_MAX];
+    uint32_t segn = build_seg_table(machBase, binarySize - (size_t)(machBase - binaryData), segs);
+    if (segn == 0) return;
+
+    // Walk load commands looking for __objc_classlist / __objc_catlist / __objc_protolist
+    const char* lc = machBase + sizeof(struct mach_header_64);
+    size_t machSize = binarySize - (size_t)(machBase - binaryData);
+
+    for (uint32_t ci = 0; ci < mh->ncmds; ci++) {
+        if ((size_t)(lc - machBase) + sizeof(struct load_command) > machSize) break;
+        const struct load_command* cmd = (const struct load_command*)lc;
+        if (cmd->cmdsize == 0) break;
+
+        if (cmd->cmd == LC_SEGMENT_64 &&
+            (size_t)(lc - machBase) + sizeof(struct segment_command_64) <= machSize) {
+            const struct segment_command_64* sc = (const struct segment_command_64*)lc;
+            const struct section_64* sect = (const struct section_64*)(sc + 1);
+
+            for (uint32_t si = 0; si < sc->nsects; si++, sect++) {
+                if ((size_t)((const char*)sect - binaryData) + sizeof(struct section_64) > binarySize) break;
+                const char* sname = sect->sectname;
+
+                // ── __objc_classlist ──────────────────────────────────────────
+                if (strncmp(sname, "__objc_classlist", 16) == 0) {
+                    uint64_t secOffset = sect->offset;
+                    uint64_t secSize   = sect->size;
+                    if (secOffset + secSize > binarySize || secSize % 8 != 0) goto next_sect;
+                    uint32_t nclasses = (uint32_t)(secSize / 8);
+
+                    for (uint32_t k = 0; k < nclasses; k++) {
+                        uint64_t clsVA; memcpy(&clsVA, binaryData + secOffset + k * 8, 8);
+                        clsVA &= PAC_MASK;
+                        const char* clsPtr = seg_resolve(binaryData, binarySize, segs, segn, clsVA);
+                        if (!clsPtr || (size_t)(clsPtr - binaryData) + sizeof(ObjcClass64) > binarySize) continue;
+
+                        ObjcClass64 cls; memcpy(&cls, clsPtr, sizeof(cls));
+                        uint64_t roVA = cls.roPtr & ~0x7ull & PAC_MASK;
+                        const char* roPtr = seg_resolve(binaryData, binarySize, segs, segn, roVA);
+                        if (!roPtr || (size_t)(roPtr - binaryData) + sizeof(ObjcClassRO64) > binarySize) continue;
+
+                        ObjcClassRO64 ro; memcpy(&ro, roPtr, sizeof(ro));
+                        char* name = cstr_at_va(binaryData, binarySize, segs, segn, ro.namePtr);
+                        if (!name) continue;
+
+                        // Check for duplicate (may have already been found via symbol table)
+                        bool dup = false;
+                        for (uint32_t d = 0; d < result->classCount; d++) {
+                            if (result->classes[d].className && strcmp(result->classes[d].className, name) == 0) {
+                                dup = true; break;
+                            }
+                        }
+                        if (dup) { free(name); continue; }
+
+                        // Grow class array
+                        if (result->classCount >= result->classCapacity) {
+                            uint32_t newCap = result->classCapacity == 0 ? 16 : result->classCapacity * 2;
+                            class_dump_info_t* tmp = realloc(result->classes, sizeof(class_dump_info_t) * newCap);
+                            if (!tmp) { free(name); continue; }
+                            result->classes = tmp; result->classCapacity = newCap;
+                        }
+
+                        class_dump_info_t* info = &result->classes[result->classCount++];
+                        memset(info, 0, sizeof(*info));
+                        info->className = name;
+                        info->isSwift   = class_dump_is_swift_class(name);
+                        info->isMetaClass = false;
+
+                        // Superclass name: follow superclass pointer one level
+                        uint64_t superVA = cls.superclass & PAC_MASK;
+                        const char* superPtr = seg_resolve(binaryData, binarySize, segs, segn, superVA);
+                        if (superPtr && (size_t)(superPtr - binaryData) + sizeof(ObjcClass64) <= binarySize) {
+                            ObjcClass64 superCls; memcpy(&superCls, superPtr, sizeof(superCls));
+                            uint64_t superRoVA = superCls.roPtr & ~0x7ull & PAC_MASK;
+                            const char* superRo = seg_resolve(binaryData, binarySize, segs, segn, superRoVA);
+                            if (superRo && (size_t)(superRo - binaryData) + sizeof(ObjcClassRO64) <= binarySize) {
+                                ObjcClassRO64 sro; memcpy(&sro, superRo, sizeof(sro));
+                                info->superclassName = cstr_at_va(binaryData, binarySize, segs, segn, sro.namePtr);
+                            }
+                        }
+                        if (!info->superclassName) info->superclassName = strdup("NSObject");
+
+                        // Instance methods
+                        parse_methods(binaryData, binarySize, segs, segn, ro.methods,
+                                      &info->instanceMethods, &info->instanceMethodCount);
+
+                        // Class methods: follow metaclass -> its ro -> its methods
+                        uint64_t metaVA = cls.metaclass & PAC_MASK;
+                        const char* metaPtr = seg_resolve(binaryData, binarySize, segs, segn, metaVA);
+                        if (metaPtr && (size_t)(metaPtr - binaryData) + sizeof(ObjcClass64) <= binarySize) {
+                            ObjcClass64 meta; memcpy(&meta, metaPtr, sizeof(meta));
+                            uint64_t metaRoVA = meta.roPtr & ~0x7ull & PAC_MASK;
+                            const char* metaRo = seg_resolve(binaryData, binarySize, segs, segn, metaRoVA);
+                            if (metaRo && (size_t)(metaRo - binaryData) + sizeof(ObjcClassRO64) <= binarySize) {
+                                ObjcClassRO64 mro; memcpy(&mro, metaRo, sizeof(mro));
+                                parse_methods(binaryData, binarySize, segs, segn, mro.methods,
+                                              &info->classMethods, &info->classMethodCount);
+                            }
+                        }
+
+                        parse_properties(binaryData, binarySize, segs, segn, ro.properties,
+                                         &info->properties, &info->propertyCount);
+                        parse_ivars(binaryData, binarySize, segs, segn, ro.ivars,
+                                    &info->ivars, &info->ivarCount);
+
+                        printf("[ClassDumpC] Parsed class: %s (%u inst methods, %u class methods, "
+                               "%u props, %u ivars)\n",
+                               name, info->instanceMethodCount, info->classMethodCount,
+                               info->propertyCount, info->ivarCount);
+                    }
+                }
+
+                // ── __objc_catlist ────────────────────────────────────────────
+                else if (strncmp(sname, "__objc_catlist", 16) == 0) {
+                    uint64_t secOffset = sect->offset;
+                    uint64_t secSize   = sect->size;
+                    if (secOffset + secSize > binarySize || secSize % 8 != 0) goto next_sect;
+                    uint32_t ncats = (uint32_t)(secSize / 8);
+
+                    for (uint32_t k = 0; k < ncats; k++) {
+                        uint64_t catVA; memcpy(&catVA, binaryData + secOffset + k * 8, 8);
+                        catVA &= PAC_MASK;
+                        const char* catPtr = seg_resolve(binaryData, binarySize, segs, segn, catVA);
+                        if (!catPtr || (size_t)(catPtr - binaryData) + sizeof(ObjcCategory64) > binarySize) continue;
+
+                        ObjcCategory64 cat; memcpy(&cat, catPtr, sizeof(cat));
+                        char* catName = cstr_at_va(binaryData, binarySize, segs, segn, cat.namePtr);
+                        if (!catName) continue;
+
+                        if (result->categoryCount >= result->categoryCapacity) {
+                            uint32_t newCap = result->categoryCapacity == 0 ? 16 : result->categoryCapacity * 2;
+                            category_dump_info_t* tmp = realloc(result->categories, sizeof(category_dump_info_t) * newCap);
+                            if (!tmp) { free(catName); continue; }
+                            result->categories = tmp; result->categoryCapacity = newCap;
+                        }
+
+                        category_dump_info_t* info = &result->categories[result->categoryCount++];
+                        memset(info, 0, sizeof(*info));
+                        info->categoryName = catName;
+
+                        // Try to get the extended class name from the cls pointer's ro->name
+                        char* clsName = NULL;
+                        uint64_t catClsVA = cat.cls & PAC_MASK;
+                        const char* catClsPtr = seg_resolve(binaryData, binarySize, segs, segn, catClsVA);
+                        if (catClsPtr && (size_t)(catClsPtr - binaryData) + sizeof(ObjcClass64) <= binarySize) {
+                            ObjcClass64 cc; memcpy(&cc, catClsPtr, sizeof(cc));
+                            uint64_t ccRoVA = cc.roPtr & ~0x7ull & PAC_MASK;
+                            const char* ccRo = seg_resolve(binaryData, binarySize, segs, segn, ccRoVA);
+                            if (ccRo && (size_t)(ccRo - binaryData) + sizeof(ObjcClassRO64) <= binarySize) {
+                                ObjcClassRO64 cro; memcpy(&cro, ccRo, sizeof(cro));
+                                clsName = cstr_at_va(binaryData, binarySize, segs, segn, cro.namePtr);
+                            }
+                        }
+                        info->className = clsName ? clsName : strdup("NSObject");
+
+                        parse_methods(binaryData, binarySize, segs, segn, cat.instMethods,
+                                      &info->instanceMethods, &info->instanceMethodCount);
+                        parse_methods(binaryData, binarySize, segs, segn, cat.classMethods,
+                                      &info->classMethods, &info->classMethodCount);
+                        parse_properties(binaryData, binarySize, segs, segn, cat.instProps,
+                                         &info->properties, &info->propertyCount);
+
+                        printf("[ClassDumpC] Parsed category: %s on %s\n", catName, info->className);
+                    }
+                }
+
+                // ── __objc_protolist ──────────────────────────────────────────
+                else if (strncmp(sname, "__objc_protolist", 16) == 0) {
+                    uint64_t secOffset = sect->offset;
+                    uint64_t secSize   = sect->size;
+                    if (secOffset + secSize > binarySize || secSize % 8 != 0) goto next_sect;
+                    uint32_t nprotos = (uint32_t)(secSize / 8);
+
+                    for (uint32_t k = 0; k < nprotos; k++) {
+                        uint64_t protoVA; memcpy(&protoVA, binaryData + secOffset + k * 8, 8);
+                        protoVA &= PAC_MASK;
+                        const char* protoPtr = seg_resolve(binaryData, binarySize, segs, segn, protoVA);
+                        if (!protoPtr || (size_t)(protoPtr - binaryData) + sizeof(ObjcProtocol64) > binarySize) continue;
+
+                        ObjcProtocol64 proto; memcpy(&proto, protoPtr, sizeof(proto));
+                        char* protoName = cstr_at_va(binaryData, binarySize, segs, segn, proto.namePtr);
+                        if (!protoName) continue;
+
+                        bool dup = false;
+                        for (uint32_t d = 0; d < result->protocolCount; d++) {
+                            if (result->protocols[d].protocolName &&
+                                strcmp(result->protocols[d].protocolName, protoName) == 0) {
+                                dup = true; break;
+                            }
+                        }
+                        if (dup) { free(protoName); continue; }
+
+                        if (result->protocolCount >= result->protocolCapacity) {
+                            uint32_t newCap = result->protocolCapacity == 0 ? 16 : result->protocolCapacity * 2;
+                            protocol_dump_info_t* tmp = realloc(result->protocols, sizeof(protocol_dump_info_t) * newCap);
+                            if (!tmp) { free(protoName); continue; }
+                            result->protocols = tmp; result->protocolCapacity = newCap;
+                        }
+
+                        protocol_dump_info_t* info = &result->protocols[result->protocolCount++];
+                        memset(info, 0, sizeof(*info));
+                        info->protocolName = protoName;
+
+                        parse_methods(binaryData, binarySize, segs, segn, proto.instMethods,
+                                      &info->methods, &info->methodCount);
+
+                        printf("[ClassDumpC] Parsed protocol: %s (%u methods)\n",
+                               protoName, info->methodCount);
+                    }
+                }
+
+                next_sect:;
+            }
+        }
+        lc += cmd->cmdsize;
+    }
 }
 
 void analyze_strings_for_objc(const char* binaryData, size_t binarySize, class_dump_result_t* result) {
-    
-    const char* stringPatterns[] = {
-        "init",
-        "dealloc", 
-        "alloc",
-        "retain",
-        "release",
-        "autorelease",
-        "copy",
-        "mutableCopy",
-        "description",
-        "debugDescription"
-    };
-    
-    int foundMethods = 0;
-    for (int p = 0; p < 10; p++) {
-        const char* pattern = stringPatterns[p];
-        const char* pos = binaryData;
-        size_t remaining = binarySize;
-        
-        while (remaining > 0) {
-            pos = memchr(pos, pattern[0], remaining);
-            if (!pos) break;
-            
-            if (strncmp(pos, pattern, strlen(pattern)) == 0) {
-                foundMethods++;
-                printf("[ClassDumpC] Found ObjC method string: %s\n", pattern);
-            }
-            
-            pos++;
-            remaining = binarySize - (pos - binaryData);
-        }
-    }
-    
-    if (foundMethods > 0) {
-        printf("[ClassDumpC] Found %d ObjC method strings, creating sample classes...\n", foundMethods);
-        
-        add_class_to_result(result, "SampleClass");
-        add_category_to_result(result, "SampleCategory");
-        add_protocol_to_result(result, "SampleProtocol");
-    }
+    // Last-resort fallback: try the runtime section parser before giving up.
+    // analyze_symbol_table_for_objc already ran; this is only called when that found nothing.
+    analyze_objc_runtime_sections(binaryData, binarySize, result);
+    if (result->classCount > 0 || result->categoryCount > 0 || result->protocolCount > 0) return;
+
+    // Binary has no ObjC runtime sections and no recognisable ObjC symbols.
+    // Don't fabricate fake class entries — just report nothing found.
+    printf("[ClassDumpC] No ObjC data found in this binary.\n");
 }
 
 void add_class_to_result(class_dump_result_t* result, const char* className) {
     if (!result || !className) return;
     
-    result->classCount++;
-    result->classes = realloc(result->classes, sizeof(class_dump_info_t) * result->classCount);
-    
-    if (result->classes) {
-        class_dump_info_t* classInfo = &result->classes[result->classCount - 1];
-        classInfo->className = strdup(className);
-        classInfo->superclassName = strdup("NSObject");
-        classInfo->protocolCount = 0;
-        classInfo->protocols = NULL;
-        classInfo->instanceMethodCount = 2;
-        classInfo->instanceMethods = malloc(sizeof(char*) * 2);
-        classInfo->instanceMethods[0] = strdup("init");
-        classInfo->instanceMethods[1] = strdup("dealloc");
-        classInfo->classMethodCount = 1;
-        classInfo->classMethods = malloc(sizeof(char*) * 1);
-        classInfo->classMethods[0] = strdup("alloc");
-        classInfo->propertyCount = 1;
-        classInfo->properties = malloc(sizeof(char*) * 1);
-        classInfo->properties[0] = strdup("data");
-        classInfo->ivarCount = 0;
-        classInfo->ivars = NULL;
-        classInfo->isSwift = false;
-        classInfo->isMetaClass = false;
+    if (result->classCount >= result->classCapacity) {
+        uint32_t newCapacity = result->classCapacity == 0 ? 16 : result->classCapacity * 2;
+        class_dump_info_t* newClasses = realloc(result->classes, sizeof(class_dump_info_t) * newCapacity);
+        if (!newClasses) return;
+        result->classes = newClasses;
+        result->classCapacity = newCapacity;
     }
+    
+    class_dump_info_t* classInfo = &result->classes[result->classCount];
+    result->classCount++;
+    
+    classInfo->className = strdup(className);
+    classInfo->superclassName = strdup("NSObject");
+    classInfo->protocolCount = 0;
+    classInfo->protocols = NULL;
+    classInfo->instanceMethodCount = 2;
+    classInfo->instanceMethods = malloc(sizeof(char*) * 2);
+    classInfo->instanceMethods[0] = strdup("init");
+    classInfo->instanceMethods[1] = strdup("dealloc");
+    classInfo->classMethodCount = 1;
+    classInfo->classMethods = malloc(sizeof(char*) * 1);
+    classInfo->classMethods[0] = strdup("alloc");
+    classInfo->propertyCount = 1;
+    classInfo->properties = malloc(sizeof(char*) * 1);
+    classInfo->properties[0] = strdup("data");
+    classInfo->ivarCount = 0;
+    classInfo->ivars = NULL;
+    classInfo->isSwift = false;
+    classInfo->isMetaClass = false;
 }
 
 void add_category_to_result(class_dump_result_t* result, const char* categoryName) {
     if (!result || !categoryName) return;
     
-    result->categoryCount++;
-    result->categories = realloc(result->categories, sizeof(category_dump_info_t) * result->categoryCount);
-    
-    if (result->categories) {
-        category_dump_info_t* categoryInfo = &result->categories[result->categoryCount - 1];
-        categoryInfo->categoryName = strdup(categoryName);
-        categoryInfo->className = strdup("NSObject");
-        categoryInfo->protocolCount = 0;
-        categoryInfo->protocols = NULL;
-        categoryInfo->instanceMethodCount = 1;
-        categoryInfo->instanceMethods = malloc(sizeof(char*) * 1);
-        categoryInfo->instanceMethods[0] = strdup("categoryMethod");
-        categoryInfo->classMethodCount = 0;
-        categoryInfo->classMethods = NULL;
-        categoryInfo->propertyCount = 0;
-        categoryInfo->properties = NULL;
+    if (result->categoryCount >= result->categoryCapacity) {
+        uint32_t newCapacity = result->categoryCapacity == 0 ? 16 : result->categoryCapacity * 2;
+        category_dump_info_t* newCats = realloc(result->categories, sizeof(category_dump_info_t) * newCapacity);
+        if (!newCats) return;
+        result->categories = newCats;
+        result->categoryCapacity = newCapacity;
     }
+    
+    category_dump_info_t* categoryInfo = &result->categories[result->categoryCount];
+    result->categoryCount++;
+    
+    categoryInfo->categoryName = strdup(categoryName);
+    categoryInfo->className = strdup("NSObject");
+    categoryInfo->protocolCount = 0;
+    categoryInfo->protocols = NULL;
+    categoryInfo->instanceMethodCount = 1;
+    categoryInfo->instanceMethods = malloc(sizeof(char*) * 1);
+    categoryInfo->instanceMethods[0] = strdup("categoryMethod");
+    categoryInfo->classMethodCount = 0;
+    categoryInfo->classMethods = NULL;
+    categoryInfo->propertyCount = 0;
+    categoryInfo->properties = NULL;
 }
 
 void add_protocol_to_result(class_dump_result_t* result, const char* protocolName) {
     if (!result || !protocolName) return;
     
-    result->protocolCount++;
-    result->protocols = realloc(result->protocols, sizeof(protocol_dump_info_t) * result->protocolCount);
-    
-    if (result->protocols) {
-        protocol_dump_info_t* protocolInfo = &result->protocols[result->protocolCount - 1];
-        protocolInfo->protocolName = strdup(protocolName);
-        protocolInfo->protocolCount = 0;
-        protocolInfo->protocols = NULL;
-        protocolInfo->methodCount = 1;
-        protocolInfo->methods = malloc(sizeof(char*) * 1);
-        protocolInfo->methods[0] = strdup("protocolMethod");
+    if (result->protocolCount >= result->protocolCapacity) {
+        uint32_t newCapacity = result->protocolCapacity == 0 ? 16 : result->protocolCapacity * 2;
+        protocol_dump_info_t* newProtos = realloc(result->protocols, sizeof(protocol_dump_info_t) * newCapacity);
+        if (!newProtos) return;
+        result->protocols = newProtos;
+        result->protocolCapacity = newCapacity;
     }
+    
+    protocol_dump_info_t* protocolInfo = &result->protocols[result->protocolCount];
+    result->protocolCount++;
+    
+    protocolInfo->protocolName = strdup(protocolName);
+    protocolInfo->protocolCount = 0;
+    protocolInfo->protocols = NULL;
+    protocolInfo->methodCount = 1;
+    protocolInfo->methods = malloc(sizeof(char*) * 1);
+    protocolInfo->methods[0] = strdup("protocolMethod");
 }
 
 // MARK: - Header Generation
@@ -648,23 +1045,38 @@ char* class_dump_extract_protocol_name(const char* symbolName) {
 
 char* class_dump_extract_method_name(const char* methodData) {
     if (!methodData) return NULL;
-    
-    // method name extraction not done yet
-    return strdup("method");
+    // Caller must pass the resolved selector C string (from cstr_at_va / __objc_methnames)
+    size_t len = strnlen(methodData, 512);
+    if (len == 0 || len >= 512) return NULL;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)methodData[i];
+        if (c < 0x20 || c > 0x7E) return NULL;
+    }
+    return strndup(methodData, len);
 }
 
 char* class_dump_extract_property_name(const char* propertyData) {
     if (!propertyData) return NULL;
-    
-    // not done yet
-    return strdup("property");
+    // Caller passes the resolved property name C string
+    size_t len = strnlen(propertyData, 256);
+    if (len == 0 || len >= 256) return NULL;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)propertyData[i];
+        if (c < 0x20 || c > 0x7E) return NULL;
+    }
+    return strndup(propertyData, len);
 }
 
 char* class_dump_extract_ivar_name(const char* ivarData) {
     if (!ivarData) return NULL;
-    
-    // ivar might be the hardest one ig not finished yet
-    return strdup("ivar");
+    // Caller passes the resolved ivar name C string
+    size_t len = strnlen(ivarData, 256);
+    if (len == 0 || len >= 256) return NULL;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)ivarData[i];
+        if (c < 0x20 || c > 0x7E) return NULL;
+    }
+    return strndup(ivarData, len);
 }
 
 // MARK: - Type Encoding and Decoding
@@ -672,50 +1084,45 @@ char* class_dump_extract_ivar_name(const char* ivarData) {
 char* class_dump_decode_type_encoding(const char* encoding) {
     if (!encoding) return NULL;
     
-    char* result = malloc(strlen(encoding) * 2);
-    if (!result) return NULL;
-    
-    strcpy(result, encoding);
-    
-    if (strstr(result, "v")) {
-        result = strdup("void");
-    } else if (strstr(result, "@")) {
-        result = strdup("id");
-    } else if (strstr(result, ":")) {
-        result = strdup("SEL");
-    } else if (strstr(result, "c")) {
-        result = strdup("char");
-    } else if (strstr(result, "i")) {
-        result = strdup("int");
-    } else if (strstr(result, "s")) {
-        result = strdup("short");
-    } else if (strstr(result, "l")) {
-        result = strdup("long");
-    } else if (strstr(result, "q")) {
-        result = strdup("long long");
-    } else if (strstr(result, "C")) {
-        result = strdup("unsigned char");
-    } else if (strstr(result, "I")) {
-        result = strdup("unsigned int");
-    } else if (strstr(result, "S")) {
-        result = strdup("unsigned short");
-    } else if (strstr(result, "L")) {
-        result = strdup("unsigned long");
-    } else if (strstr(result, "Q")) {
-        result = strdup("unsigned long long");
-    } else if (strstr(result, "f")) {
-        result = strdup("float");
-    } else if (strstr(result, "d")) {
-        result = strdup("double");
-    } else if (strstr(result, "B")) {
-        result = strdup("BOOL");
-    } else if (strstr(result, "*")) {
-        result = strdup("char*");
-    } else if (strstr(result, "#")) {
-        result = strdup("Class");
+    if (strstr(encoding, "v")) {
+        return strdup("void");
+    } else if (strstr(encoding, "@")) {
+        return strdup("id");
+    } else if (strstr(encoding, ":")) {
+        return strdup("SEL");
+    } else if (strstr(encoding, "c")) {
+        return strdup("char");
+    } else if (strstr(encoding, "i")) {
+        return strdup("int");
+    } else if (strstr(encoding, "s")) {
+        return strdup("short");
+    } else if (strstr(encoding, "l")) {
+        return strdup("long");
+    } else if (strstr(encoding, "q")) {
+        return strdup("long long");
+    } else if (strstr(encoding, "C")) {
+        return strdup("unsigned char");
+    } else if (strstr(encoding, "I")) {
+        return strdup("unsigned int");
+    } else if (strstr(encoding, "S")) {
+        return strdup("unsigned short");
+    } else if (strstr(encoding, "L")) {
+        return strdup("unsigned long");
+    } else if (strstr(encoding, "Q")) {
+        return strdup("unsigned long long");
+    } else if (strstr(encoding, "f")) {
+        return strdup("float");
+    } else if (strstr(encoding, "d")) {
+        return strdup("double");
+    } else if (strstr(encoding, "B")) {
+        return strdup("BOOL");
+    } else if (strstr(encoding, "*")) {
+        return strdup("char*");
+    } else if (strstr(encoding, "#")) {
+        return strdup("Class");
     }
     
-    return result;
+    return strdup(encoding);
 }
 
 char* class_dump_extract_property_type(const char* attributes) {
@@ -901,6 +1308,172 @@ void class_dump_free_result(class_dump_result_t* result) {
     }
     
     free(result);
+}
+
+// MARK: - Missing Declarations from Header
+
+char* class_dump_extract_method_signature(const char* methodData, const char* methodName, bool isClassMethod) {
+    if (!methodName) return NULL;
+    char* retType = methodData ? class_dump_decode_type_encoding(methodData) : strdup("void");
+    size_t bufLen = strlen(retType) + strlen(methodName) + 8;
+    char* sig = malloc(bufLen);
+    if (!sig) { free(retType); return NULL; }
+    snprintf(sig, bufLen, "%s (%s)%s", isClassMethod ? "+" : "-", retType, methodName);
+    free(retType);
+    return sig;
+}
+
+char* class_dump_extract_property_declaration(const char* propertyData, const char* propertyName) {
+    if (!propertyName) return NULL;
+    char* type = propertyData ? class_dump_extract_property_type(propertyData) : strdup("id");
+    size_t bufLen = strlen(type) + strlen(propertyName) + 32;
+    char* decl = malloc(bufLen);
+    if (!decl) { free(type); return NULL; }
+    snprintf(decl, bufLen, "@property (nonatomic, strong) %s *%s", type, propertyName);
+    free(type);
+    return decl;
+}
+
+char* class_dump_extract_ivar_declaration(const char* ivarData, const char* ivarName) {
+    if (!ivarName) return NULL;
+    char* type = ivarData ? class_dump_convert_ivar_type_to_objc(ivarData) : strdup("id");
+    size_t bufLen = strlen(type) + strlen(ivarName) + 8;
+    char* decl = malloc(bufLen);
+    if (!decl) { free(type); return NULL; }
+    snprintf(decl, bufLen, "%s %s", type, ivarName);
+    free(type);
+    return decl;
+}
+
+char* class_dump_decode_method_return_type(const char* methodData) {
+    if (!methodData) return strdup("void");
+    return class_dump_decode_type_encoding(methodData);
+}
+
+char** class_dump_extract_method_parameters(const char* methodData, uint32_t* parameterCount) {
+    if (parameterCount) *parameterCount = 0;
+    if (!methodData || !parameterCount) return NULL;
+
+    // ObjC type encoding: first char = return type, then pairs of (type, offset)
+    // Skip return type, then skip self (@) and SEL (:)
+    const char* p = methodData;
+    if (!*p) return NULL;
+    // skip return type char(s) and its offset digits
+    while (*p && (*p < '0' || *p > '9')) p++;  // skip type chars
+    while (*p >= '0' && *p <= '9') p++;         // skip stack offset
+    // now skip self and SEL
+    for (int skip = 0; skip < 2 && *p; skip++) {
+        while (*p && (*p < '0' || *p > '9')) p++;
+        while (*p >= '0' && *p <= '9') p++;
+    }
+
+    // Count remaining parameters
+    uint32_t count = 0;
+    const char* q = p;
+    while (*q) {
+        while (*q && (*q < '0' || *q > '9')) q++;
+        if (*q >= '0' && *q <= '9') { count++; while (*q >= '0' && *q <= '9') q++; }
+    }
+
+    if (count == 0) return NULL;
+    char** params = malloc(sizeof(char*) * count);
+    if (!params) return NULL;
+
+    uint32_t idx = 0;
+    while (*p && idx < count) {
+        const char* typeStart = p;
+        while (*p && (*p < '0' || *p > '9')) p++;
+        size_t typeLen = (size_t)(p - typeStart);
+        char typeEnc[64]; snprintf(typeEnc, sizeof(typeEnc), "%.*s", (int)typeLen, typeStart);
+        params[idx++] = class_dump_decode_type_encoding(typeEnc);
+        while (*p >= '0' && *p <= '9') p++;
+    }
+    *parameterCount = idx;
+    return params;
+}
+
+char* class_dump_format_class_interface(class_dump_info_t* classInfo) {
+    return class_dump_generate_class_header(classInfo);
+}
+
+char* class_dump_format_class_implementation(class_dump_info_t* classInfo) {
+    if (!classInfo) return NULL;
+    size_t bufLen = 256 + (classInfo->instanceMethodCount + classInfo->classMethodCount) * 64;
+    char* buf = malloc(bufLen);
+    if (!buf) return NULL;
+    int off = snprintf(buf, bufLen, "@implementation %s\n", classInfo->className);
+    for (uint32_t i = 0; i < classInfo->instanceMethodCount && off < (int)bufLen - 32; i++)
+        off += snprintf(buf + off, bufLen - (size_t)off, "- (void)%s {}\n",
+                        classInfo->instanceMethods[i]);
+    for (uint32_t i = 0; i < classInfo->classMethodCount && off < (int)bufLen - 32; i++)
+        off += snprintf(buf + off, bufLen - (size_t)off, "+ (void)%s {}\n",
+                        classInfo->classMethods[i]);
+    snprintf(buf + off, bufLen - (size_t)off, "@end\n\n");
+    return buf;
+}
+
+char* class_dump_format_category_interface(category_dump_info_t* categoryInfo) {
+    return class_dump_generate_category_header(categoryInfo);
+}
+
+char* class_dump_format_category_implementation(category_dump_info_t* categoryInfo) {
+    if (!categoryInfo) return NULL;
+    size_t bufLen = 128 + (categoryInfo->instanceMethodCount + categoryInfo->classMethodCount) * 64;
+    char* buf = malloc(bufLen);
+    if (!buf) return NULL;
+    int off = snprintf(buf, bufLen, "@implementation %s (%s)\n",
+                       categoryInfo->className, categoryInfo->categoryName);
+    for (uint32_t i = 0; i < categoryInfo->instanceMethodCount && off < (int)bufLen - 32; i++)
+        off += snprintf(buf + off, bufLen - (size_t)off, "- (void)%s {}\n",
+                        categoryInfo->instanceMethods[i]);
+    for (uint32_t i = 0; i < categoryInfo->classMethodCount && off < (int)bufLen - 32; i++)
+        off += snprintf(buf + off, bufLen - (size_t)off, "+ (void)%s {}\n",
+                        categoryInfo->classMethods[i]);
+    snprintf(buf + off, bufLen - (size_t)off, "@end\n\n");
+    return buf;
+}
+
+char* class_dump_format_protocol_declaration(protocol_dump_info_t* protocolInfo) {
+    return class_dump_generate_protocol_header(protocolInfo);
+}
+
+char* class_dump_generate_method_signature(const char* methodName, const char* types, bool isClassMethod) {
+    return class_dump_extract_method_signature(types, methodName, isClassMethod);
+}
+
+char* class_dump_generate_property_signature(const char* propertyName, const char* attributes) {
+    return class_dump_extract_property_declaration(attributes, propertyName);
+}
+
+char* class_dump_generate_ivar_signature(const char* ivarName, const char* type) {
+    return class_dump_extract_ivar_declaration(type, ivarName);
+}
+
+char* class_dump_convert_type_encoding_to_objc(const char* encoding) {
+    return class_dump_decode_type_encoding(encoding);
+}
+
+char* class_dump_convert_property_attributes_to_objc(const char* attributes) {
+    if (!attributes) return strdup("id");
+    char* type = class_dump_extract_property_type(attributes);
+
+    // Build qualifier string from attribute flags (R=readonly, C=copy, N=nonatomic, W=weak, &=strong)
+    char quals[64] = "nonatomic";
+    if (strchr(attributes, 'R')) strncat(quals, ", readonly",  sizeof(quals) - strlen(quals) - 1);
+    else if (strchr(attributes, 'C')) strncat(quals, ", copy",   sizeof(quals) - strlen(quals) - 1);
+    else if (strchr(attributes, 'W')) strncat(quals, ", weak",   sizeof(quals) - strlen(quals) - 1);
+    else                              strncat(quals, ", strong",  sizeof(quals) - strlen(quals) - 1);
+
+    size_t bufLen = strlen(quals) + strlen(type) + 4;
+    char* result = malloc(bufLen);
+    if (!result) { free(type); return NULL; }
+    snprintf(result, bufLen, "%s %s", quals, type);
+    free(type);
+    return result;
+}
+
+char* class_dump_convert_ivar_type_to_objc(const char* ivarType) {
+    return class_dump_decode_type_encoding(ivarType);
 }
 
 // MARK: - Debug and Logging

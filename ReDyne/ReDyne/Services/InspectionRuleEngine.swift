@@ -47,10 +47,16 @@ final class InspectionRuleEngine {
 
     private init() {}
 
+    // MARK: - Cached Rules
+
+    private lazy var cachedAllRules: [InspectionRule] = {
+        return securityRules() + qualityRules() + compatibilityRules() + performanceRules()
+    }()
+
     // MARK: - Run All Rules
 
     func evaluate(output: DecompiledOutput) -> InspectionReport {
-        let rules = allRules()
+        let rules = cachedAllRules
         var results = [(rule: InspectionRule, result: RuleResult)]()
         var passCount = 0
         var failCount = 0
@@ -162,11 +168,11 @@ final class InspectionRuleEngine {
                 severity: .critical
             ) { output in
                 let symbols = (output.symbols as? [SymbolModel]) ?? []
-                let dangerousAPIs = ["_system", "_popen", "_execl", "_execle",
+                let dangerousAPIs: Set<String> = ["_system", "_popen", "_execl", "_execle",
                                      "_execlp", "_execv", "_execve", "_execvp"]
                 var found = [String]()
                 for sym in symbols {
-                    for api in dangerousAPIs where sym.name == api || sym.name == "_\(api)" {
+                    if dangerousAPIs.contains(sym.name) {
                         found.append(sym.name)
                     }
                 }
@@ -191,11 +197,11 @@ final class InspectionRuleEngine {
                 severity: .high
             ) { output in
                 let symbols = (output.symbols as? [SymbolModel]) ?? []
-                let insecureFunctions = ["_gets", "_strcpy", "_sprintf", "_strcat",
+                let insecureFunctions: Set<String> = ["_gets", "_strcpy", "_sprintf", "_strcat",
                                          "_vsprintf", "_scanf", "_sscanf"]
                 var found = [String]()
                 for sym in symbols {
-                    for fn in insecureFunctions where sym.name == fn {
+                    if insecureFunctions.contains(sym.name) {
                         found.append(sym.name)
                     }
                 }
@@ -268,8 +274,11 @@ final class InspectionRuleEngine {
                 ]
                 var found = [String]()
                 for str in strings {
-                    for prefix in privateEntitlementPrefixes where str.content.contains(prefix) {
-                        found.append(str.content)
+                    for prefix in privateEntitlementPrefixes {
+                        if str.content.contains(prefix) {
+                            found.append(str.content)
+                            break
+                        }
                     }
                 }
                 let unique = Array(Set(found))

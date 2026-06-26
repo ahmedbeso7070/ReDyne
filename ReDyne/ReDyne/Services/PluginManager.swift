@@ -112,6 +112,7 @@ extension AnalysisPlugin {
 class PluginManager {
     static let shared = PluginManager()
 
+    private let queue = DispatchQueue(label: "com.redyne.pluginManager")
     private var registeredPlugins: [String: AnalysisPlugin] = [:]
     private var pluginResults: [String: PluginResult] = [:]
 
@@ -122,51 +123,57 @@ class PluginManager {
     // MARK: - Registration
 
     func register(plugin: AnalysisPlugin) {
-        registeredPlugins[plugin.pluginID] = plugin
+        queue.sync { registeredPlugins[plugin.pluginID] = plugin }
     }
 
     func unregister(pluginID: String) {
-        registeredPlugins.removeValue(forKey: pluginID)
-        pluginResults.removeValue(forKey: pluginID)
+        queue.sync {
+            registeredPlugins.removeValue(forKey: pluginID)
+            pluginResults.removeValue(forKey: pluginID)
+        }
     }
 
     // MARK: - Queries
 
     var plugins: [AnalysisPlugin] {
-        return Array(registeredPlugins.values).sorted { $0.name < $1.name }
+        return queue.sync { Array(registeredPlugins.values).sorted { $0.name < $1.name } }
     }
 
     func plugins(for category: PluginCategory) -> [AnalysisPlugin] {
-        return plugins.filter { $0.category == category }
+        return queue.sync { Array(registeredPlugins.values).filter { $0.category == category }.sorted { $0.name < $1.name } }
     }
 
     func plugin(for pluginID: String) -> AnalysisPlugin? {
-        return registeredPlugins[pluginID]
+        return queue.sync { registeredPlugins[pluginID] }
     }
 
     // MARK: - Execution
 
     @discardableResult
     func runPlugin(_ pluginID: String, output: DecompiledOutput, binaryPath: String?) -> PluginResult? {
-        guard let plugin = registeredPlugins[pluginID] else { return nil }
-        let result = plugin.analyze(output: output, binaryPath: binaryPath)
-        pluginResults[pluginID] = result
-        return result
+        return queue.sync {
+            guard let plugin = registeredPlugins[pluginID] else { return nil }
+            let result = plugin.analyze(output: output, binaryPath: binaryPath)
+            pluginResults[pluginID] = result
+            return result
+        }
     }
 
     func runAllPlugins(output: DecompiledOutput, binaryPath: String?) {
-        for (pluginID, plugin) in registeredPlugins {
-            let result = plugin.analyze(output: output, binaryPath: binaryPath)
-            pluginResults[pluginID] = result
+        queue.sync {
+            for (pluginID, plugin) in registeredPlugins {
+                let result = plugin.analyze(output: output, binaryPath: binaryPath)
+                pluginResults[pluginID] = result
+            }
         }
     }
 
     func result(for pluginID: String) -> PluginResult? {
-        return pluginResults[pluginID]
+        return queue.sync { pluginResults[pluginID] }
     }
 
     func clearResults() {
-        pluginResults.removeAll()
+        queue.sync { pluginResults.removeAll() }
     }
 
     // MARK: - Built-in Plugins

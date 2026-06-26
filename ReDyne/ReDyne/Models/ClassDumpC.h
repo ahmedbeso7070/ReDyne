@@ -48,10 +48,13 @@ typedef struct {
 typedef struct {
     class_dump_info_t* classes;
     uint32_t classCount;
+    uint32_t classCapacity;
     category_dump_info_t* categories;
     uint32_t categoryCount;
+    uint32_t categoryCapacity;
     protocol_dump_info_t* protocols;
     uint32_t protocolCount;
+    uint32_t protocolCapacity;
     char* generatedHeader;
     size_t headerSize;
 } class_dump_result_t;

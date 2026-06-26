@@ -85,14 +85,21 @@ static ARM64Register make_reg(uint8_t num, bool is_64bit) {
     ARM64Register reg;
     reg.num = num;
     reg.is_64bit = is_64bit;
-    reg.is_sp = (num == 31);
+    reg.is_sp = false;
     reg.is_zero = (num == 31);
     return reg;
 }
 
+// ponytail: for memory base operands, r31 is always SP not ZR
+static ARM64Register make_base_reg(uint8_t num) {
+    ARM64Register reg = make_reg(num, true);
+    if (num == 31) { reg.is_sp = true; reg.is_zero = false; }
+    return reg;
+}
+
 const char* arm64dec_register_name(ARM64Register reg) {
-    static char buf[8];
-    
+    static _Thread_local char buf[8];
+
     if (reg.num == 31) {
         if (reg.is_sp) {
             return reg.is_64bit ? "sp" : "wsp";
@@ -366,14 +373,14 @@ static bool decode_load_store_instruction(uint32_t ins, uint64_t addr, ARM64Deco
         decoded->operands[0].type = ARM64_OPERAND_REG;
         decoded->operands[0].reg = make_reg(rt, is_64);
         decoded->operands[1].type = ARM64_OPERAND_MEM;
-        decoded->operands[1].mem.base = make_reg(rn, true);
+        decoded->operands[1].mem.base = make_base_reg(rn);
         decoded->operands[1].mem.offset_imm = imm12 << size;
         decoded->operands[1].mem.mode = ARM64_ADDR_OFFSET;
-        
+
         decoded->operand_count = 2;
         return true;
     }
-    
+
     if ((op0 & 0b0011) == 0b0011 && op1 == 1 && op2 == 0b00 && op4 == 0b10) {
         uint8_t size = BITS(ins, 30, 31);
         bool is_load = BIT(ins, 22);
@@ -401,7 +408,7 @@ static bool decode_load_store_instruction(uint32_t ins, uint64_t addr, ARM64Deco
         decoded->operands[0].type = ARM64_OPERAND_REG;
         decoded->operands[0].reg = make_reg(rt, is_64);
         decoded->operands[1].type = ARM64_OPERAND_MEM;
-        decoded->operands[1].mem.base = make_reg(rn, true);
+        decoded->operands[1].mem.base = make_base_reg(rn);
         decoded->operands[1].mem.offset_reg = make_reg(rm, true);
         decoded->operands[1].mem.mode = ARM64_ADDR_REG_EXTENDED;
         decoded->operands[1].mem.extend_type = option;
@@ -432,7 +439,7 @@ static bool decode_load_store_instruction(uint32_t ins, uint64_t addr, ARM64Deco
         decoded->operands[1].reg = make_reg(rt2, is_64);
         
         decoded->operands[2].type = ARM64_OPERAND_MEM;
-        decoded->operands[2].mem.base = make_reg(rn, true);
+        decoded->operands[2].mem.base = make_base_reg(rn);
         decoded->operands[2].mem.offset_imm = imm7 << scale;
         
         if (op2 == 0b01) {

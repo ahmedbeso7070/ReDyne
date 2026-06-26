@@ -74,6 +74,7 @@ bool symbol_table_categorize(SymbolTableContext *ctx);
 uint32_t symbol_table_extract_functions(SymbolTableContext *ctx);
 
 int32_t symbol_table_find_by_name(SymbolTableContext *ctx, const char *name);
+int32_t symbol_table_find_by_name_sorted(SymbolTableContext *ctx, const char *name);
 
 int32_t symbol_table_find_by_address(SymbolTableContext *ctx, uint64_t address);
 

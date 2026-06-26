@@ -83,21 +83,21 @@ typedef struct {
     SegmentInfo *segments;
     uint32_t section_count;
     SectionInfo *sections;
-    uint32_t symtab_offset;
+    uint64_t symtab_offset;    // file offsets are 64-bit (CWE-197 fix)
     uint32_t nsyms;
-    uint32_t stroff;
+    uint64_t stroff;
     uint32_t strsize;
-    uint32_t dysymtab_offset;
-    
+    uint64_t dysymtab_offset;
+
     bool has_dyld_info;
-    uint32_t rebase_off, rebase_size;
-    uint32_t bind_off, bind_size;
-    uint32_t weak_bind_off, weak_bind_size;
-    uint32_t lazy_bind_off, lazy_bind_size;
-    uint32_t export_off, export_size;
-    
+    uint64_t rebase_off;   uint32_t rebase_size;
+    uint64_t bind_off;     uint32_t bind_size;
+    uint64_t weak_bind_off; uint32_t weak_bind_size;
+    uint64_t lazy_bind_off; uint32_t lazy_bind_size;
+    uint64_t export_off;   uint32_t export_size;
+
     bool is_encrypted;
-    uint32_t cryptoff;
+    uint64_t cryptoff;
     uint32_t cryptsize;
     uint32_t cryptid;
     uint8_t uuid[16];
@@ -117,22 +117,22 @@ typedef struct {
 
     // Function starts
     bool has_function_starts;
-    uint32_t function_starts_offset;
+    uint64_t function_starts_offset;
     uint32_t function_starts_size;
 
     // Data in code
     bool has_data_in_code;
-    uint32_t data_in_code_offset;
+    uint64_t data_in_code_offset;
     uint32_t data_in_code_size;
 
     // Chained fixups (modern iOS 15+ binaries)
     bool has_chained_fixups;
-    uint32_t chained_fixups_offset;
+    uint64_t chained_fixups_offset;
     uint32_t chained_fixups_size;
 
     // Exports trie (new style, separate from LC_DYLD_INFO)
     bool has_exports_trie;
-    uint32_t exports_trie_offset;
+    uint64_t exports_trie_offset;
     uint32_t exports_trie_size;
 
     // Build version info
@@ -144,6 +144,9 @@ typedef struct {
     // Source version
     uint64_t source_version;
     bool has_source_version;
+
+    // Non-zero when the Mach-O is embedded inside a container (e.g. bplist wrapper)
+    uint64_t base_offset;
 
     // Security-relevant flags
     bool is_pie;

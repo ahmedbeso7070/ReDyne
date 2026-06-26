@@ -165,15 +165,25 @@ static int parse_method_list(MachOContext *ctx, uint64_t method_list_vm_addr, Ob
         return 0;
     }
     
-    uint32_t entsize = read_uint32_at_offset(ctx, file_offset);
+    uint32_t entsizeAndFlags = read_uint32_at_offset(ctx, file_offset);
     uint32_t count = read_uint32_at_offset(ctx, file_offset + 4);
-    
+
     if (count == 0 || count > 10000) {
         *methods_out = NULL;
         return 0;
     }
 
-    if (file_offset + 8 + (uint64_t)count * sizeof(objc_method_64_t) > (uint64_t)ctx->file_size) {
+    // The low bit of entsizeAndFlags signals "small" (relative-offset) methods
+    // introduced in iOS 14 / macOS 11. Entry stride is 12 bytes for small, 24 for big.
+    bool isSmall = (entsizeAndFlags & 0x80000000u) != 0;
+    uint32_t stride = isSmall ? 12u : (uint32_t)sizeof(objc_method_64_t);
+    if (!isSmall) {
+        // Use declared entsize (masked) when it's sane; fall back to struct size.
+        uint32_t declared = entsizeAndFlags & ~0x3u;
+        if (declared >= sizeof(objc_method_64_t) && declared <= 128) stride = declared;
+    }
+
+    if (file_offset + 8 + (uint64_t)count * stride > (uint64_t)ctx->file_size) {
         *methods_out = NULL;
         return 0;
     }
@@ -183,37 +193,58 @@ static int parse_method_list(MachOContext *ctx, uint64_t method_list_vm_addr, Ob
         *methods_out = NULL;
         return 0;
     }
-    
+
     uint64_t method_offset = file_offset + 8;
     for (uint32_t i = 0; i < count; i++) {
-        objc_method_64_t method;
-        fseek(ctx->file, method_offset, SEEK_SET);
-        if (fread(&method, sizeof(objc_method_64_t), 1, ctx->file) != 1) break;
-        
-        if (ctx->header.is_swapped) {
-            method.name_ptr = __builtin_bswap64(method.name_ptr);
-            method.types_ptr = __builtin_bswap64(method.types_ptr);
-            method.imp = __builtin_bswap64(method.imp);
-        }
-        
-        if (is_valid_address(ctx, method.name_ptr)) {
-            uint64_t name_offset = vm_addr_to_file_offset(ctx, method.name_ptr);
-            if (name_offset > 0) {
-                read_string_at_offset(ctx, name_offset, methods[i].name, sizeof(methods[i].name));
+        if (isSmall) {
+            // Small method: three int32_t relative offsets (nameRef, types, imp)
+            // nameRelOff points from &nameRelOff to a pointer-sized selector ref slot.
+            int32_t nameRelOff = 0;
+            fseek(ctx->file, method_offset, SEEK_SET);
+            if (fread(&nameRelOff, sizeof(int32_t), 1, ctx->file) != 1) break;
+            if (ctx->header.is_swapped) nameRelOff = (int32_t)__builtin_bswap32((uint32_t)nameRelOff);
+
+            uint64_t refVA = method_list_vm_addr + 8 + (uint64_t)i * stride + (uint64_t)(int64_t)nameRelOff;
+            uint64_t refFileOff = vm_addr_to_file_offset(ctx, refVA);
+            if (refFileOff > 0 && refFileOff + 8 <= (uint64_t)ctx->file_size) {
+                uint64_t nameVA = 0;
+                fseek(ctx->file, refFileOff, SEEK_SET);
+                if (fread(&nameVA, sizeof(uint64_t), 1, ctx->file) == 1) {
+                    if (ctx->header.is_swapped) nameVA = __builtin_bswap64(nameVA);
+                    uint64_t nameOff = vm_addr_to_file_offset(ctx, nameVA);
+                    if (nameOff > 0)
+                        read_string_at_offset(ctx, nameOff, methods[i].name, sizeof(methods[i].name));
+                }
             }
-        }
-        
-        if (is_valid_address(ctx, method.types_ptr)) {
-            uint64_t types_offset = vm_addr_to_file_offset(ctx, method.types_ptr);
-            if (types_offset > 0) {
-                read_string_at_offset(ctx, types_offset, methods[i].types, sizeof(methods[i].types));
+            // types and imp offsets: skip (we don't use them here)
+        } else {
+            objc_method_64_t method;
+            fseek(ctx->file, method_offset, SEEK_SET);
+            if (fread(&method, sizeof(objc_method_64_t), 1, ctx->file) != 1) break;
+
+            if (ctx->header.is_swapped) {
+                method.name_ptr  = __builtin_bswap64(method.name_ptr);
+                method.types_ptr = __builtin_bswap64(method.types_ptr);
+                method.imp       = __builtin_bswap64(method.imp);
             }
+
+            if (is_valid_address(ctx, method.name_ptr)) {
+                uint64_t name_offset = vm_addr_to_file_offset(ctx, method.name_ptr);
+                if (name_offset > 0)
+                    read_string_at_offset(ctx, name_offset, methods[i].name, sizeof(methods[i].name));
+            }
+
+            if (is_valid_address(ctx, method.types_ptr)) {
+                uint64_t types_offset = vm_addr_to_file_offset(ctx, method.types_ptr);
+                if (types_offset > 0)
+                    read_string_at_offset(ctx, types_offset, methods[i].types, sizeof(methods[i].types));
+            }
+
+            methods[i].implementation = method.imp;
         }
-        
-        methods[i].implementation = method.imp;
+
         methods[i].is_class_method = is_class_method;
-        
-        method_offset += sizeof(objc_method_64_t);
+        method_offset += stride;
     }
     
     *methods_out = methods;

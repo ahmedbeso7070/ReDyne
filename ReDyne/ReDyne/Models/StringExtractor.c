@@ -191,8 +191,12 @@ uint32_t string_extract_cfstrings(StringContext *ctx, FILE *file,
 
         if (str_len == 0 || str_len >= MAX_STRING_LENGTH) continue;
 
-        /* Convert VM address to file offset */
-        uint64_t str_file_offset = str_ptr - text_segment_vmaddr + text_segment_fileoff;
+        /* Convert VM address to file offset — guard against underflow (CWE-191):
+         * if str_ptr is below text_segment_vmaddr the subtraction wraps to a
+         * huge value; adding text_segment_fileoff can wrap back to a small value
+         * that slips past the bounds check, causing reads from wrong file regions. */
+        if (str_ptr < text_segment_vmaddr) continue;
+        uint64_t str_file_offset = (str_ptr - text_segment_vmaddr) + text_segment_fileoff;
 
         if (str_file_offset >= file_data_size) continue;
         if (str_file_offset + str_len > file_data_size) continue;

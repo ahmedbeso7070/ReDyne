@@ -261,12 +261,127 @@ Expression* pseudocode_build_expression(PseudocodeContext *ctx, const Pseudocode
         return memExpr;
     }
     
-    if (strncmp(mnemonic, "mul", 3) == 0 || strncmp(mnemonic, "MUL", 3) == 0) {
+    if (strncmp(mnemonic, "mul", 3) == 0 || strncmp(mnemonic, "MUL", 3) == 0 ||
+        strncmp(mnemonic, "smull", 5) == 0 || strncmp(mnemonic, "umull", 5) == 0 ||
+        strncmp(mnemonic, "SMULL", 5) == 0 || strncmp(mnemonic, "UMULL", 5) == 0) {
         char dest[32], src1[32], src2[32];
         if (sscanf(inst->operands, "%[^,], %[^,], %s", dest, src1, src2) == 3) {
             Expression *left = create_variable_expr(src1);
             Expression *right = create_variable_expr(src2);
             return create_binary_expr(OP_MUL, left, right);
+        }
+    }
+
+    if (strncmp(mnemonic, "udiv", 4) == 0 || strncmp(mnemonic, "sdiv", 4) == 0 ||
+        strncmp(mnemonic, "UDIV", 4) == 0 || strncmp(mnemonic, "SDIV", 4) == 0) {
+        char dest[32], src1[32], src2[32];
+        if (sscanf(inst->operands, "%[^,], %[^,], %s", dest, src1, src2) == 3) {
+            return create_binary_expr(OP_DIV, create_variable_expr(src1), create_variable_expr(src2));
+        }
+    }
+
+    if (strncmp(mnemonic, "lsl", 3) == 0 || strncmp(mnemonic, "LSL", 3) == 0) {
+        char dest[32], src1[32], src2[32];
+        if (sscanf(inst->operands, "%[^,], %[^,], %s", dest, src1, src2) == 3) {
+            Expression *right = (src2[0] == '#') ? create_constant_expr(strtoull(src2+1, NULL, 0)) : create_variable_expr(src2);
+            return create_binary_expr(OP_SHL, create_variable_expr(src1), right);
+        }
+    }
+
+    if (strncmp(mnemonic, "lsr", 3) == 0 || strncmp(mnemonic, "asr", 3) == 0 ||
+        strncmp(mnemonic, "ror", 3) == 0 || strncmp(mnemonic, "LSR", 3) == 0 ||
+        strncmp(mnemonic, "ASR", 3) == 0 || strncmp(mnemonic, "ROR", 3) == 0) {
+        char dest[32], src1[32], src2[32];
+        if (sscanf(inst->operands, "%[^,], %[^,], %s", dest, src1, src2) == 3) {
+            Expression *right = (src2[0] == '#') ? create_constant_expr(strtoull(src2+1, NULL, 0)) : create_variable_expr(src2);
+            return create_binary_expr(OP_SHR, create_variable_expr(src1), right);
+        }
+    }
+
+    if (strncmp(mnemonic, "neg", 3) == 0 || strncmp(mnemonic, "NEG", 3) == 0) {
+        char dest[32], src[32];
+        if (sscanf(inst->operands, "%[^,], %s", dest, src) == 2) {
+            Expression *expr = calloc(1, sizeof(Expression));
+            expr->type = EXPR_UNARY_OP;
+            expr->unaryOp.op = OP_NEG;
+            expr->unaryOp.operand = create_variable_expr(src);
+            return expr;
+        }
+    }
+
+    if (strncmp(mnemonic, "mvn", 3) == 0 || strncmp(mnemonic, "MVN", 3) == 0) {
+        char dest[32], src[32];
+        if (sscanf(inst->operands, "%[^,], %s", dest, src) == 2) {
+            Expression *expr = calloc(1, sizeof(Expression));
+            expr->type = EXPR_UNARY_OP;
+            expr->unaryOp.op = OP_NOT;
+            expr->unaryOp.operand = (src[0] == '#') ? create_constant_expr(strtoull(src+1, NULL, 0)) : create_variable_expr(src);
+            return expr;
+        }
+    }
+
+    if (strncmp(mnemonic, "subs", 4) == 0 || strncmp(mnemonic, "SUBS", 4) == 0) {
+        char dest[32], src1[32], src2[32];
+        if (sscanf(inst->operands, "%[^,], %[^,], %s", dest, src1, src2) == 3) {
+            Expression *right = (src2[0] == '#') ? create_constant_expr(strtoull(src2+1, NULL, 0)) : create_variable_expr(src2);
+            return create_binary_expr(OP_SUB, create_variable_expr(src1), right);
+        }
+    }
+
+    if (strncmp(mnemonic, "adds", 4) == 0 || strncmp(mnemonic, "ADDS", 4) == 0) {
+        char dest[32], src1[32], src2[32];
+        if (sscanf(inst->operands, "%[^,], %[^,], %s", dest, src1, src2) == 3) {
+            Expression *right = (src2[0] == '#') ? create_constant_expr(strtoull(src2+1, NULL, 0)) : create_variable_expr(src2);
+            return create_binary_expr(OP_ADD, create_variable_expr(src1), right);
+        }
+    }
+
+    // CSEL Rd, Rn, Rm, cond → ternary expression
+    if (strncmp(mnemonic, "csel", 4) == 0 || strncmp(mnemonic, "CSEL", 4) == 0) {
+        char dest[32], src1[32], src2[32], cond_str[16];
+        if (sscanf(inst->operands, "%[^,], %[^,], %[^,], %s", dest, src1, src2, cond_str) == 4) {
+            Expression *ternary = calloc(1, sizeof(Expression));
+            ternary->type = EXPR_TERNARY;
+            Expression *cond = calloc(1, sizeof(Expression));
+            cond->type = EXPR_VARIABLE;
+            if (ctx && ctx->has_pending_cmp) {
+                const char *op = strncasecmp(cond_str,"eq",2)==0 ? "==" :
+                                 strncasecmp(cond_str,"ne",2)==0 ? "!=" :
+                                 strncasecmp(cond_str,"lt",2)==0 ? "<"  :
+                                 strncasecmp(cond_str,"gt",2)==0 ? ">"  :
+                                 strncasecmp(cond_str,"le",2)==0 ? "<=" :
+                                 strncasecmp(cond_str,"ge",2)==0 ? ">=" : "?";
+                snprintf(cond->variable.name, sizeof(cond->variable.name),
+                         "(%s %s %s)", ctx->last_cmp_left, op, ctx->last_cmp_right);
+            } else {
+                snprintf(cond->variable.name, sizeof(cond->variable.name), "%s_cond", cond_str);
+            }
+            ternary->ternary.condition = cond;
+            ternary->ternary.trueExpr  = create_variable_expr(src1);
+            ternary->ternary.falseExpr = create_variable_expr(src2);
+            return ternary;
+        }
+    }
+
+    // CSET Rd, cond → boolean 0/1 derived from flags
+    if (strncmp(mnemonic, "cset", 4) == 0 || strncmp(mnemonic, "CSET", 4) == 0 ||
+        strncmp(mnemonic, "csinc", 5) == 0 || strncmp(mnemonic, "CSINC", 5) == 0) {
+        char dest[32], cond_str[16];
+        if (sscanf(inst->operands, "%[^,], %s", dest, cond_str) >= 2) {
+            Expression *expr = calloc(1, sizeof(Expression));
+            expr->type = EXPR_VARIABLE;
+            if (ctx && ctx->has_pending_cmp) {
+                const char *op = strncasecmp(cond_str,"eq",2)==0 ? "==" :
+                                 strncasecmp(cond_str,"ne",2)==0 ? "!=" :
+                                 strncasecmp(cond_str,"lt",2)==0 ? "<"  :
+                                 strncasecmp(cond_str,"gt",2)==0 ? ">"  : "?";
+                snprintf(expr->variable.name, sizeof(expr->variable.name),
+                         "(%s %s %s) ? 1 : 0",
+                         ctx->last_cmp_left, op, ctx->last_cmp_right);
+            } else {
+                snprintf(expr->variable.name, sizeof(expr->variable.name), "%s_bool", cond_str);
+            }
+            return expr;
         }
     }
     
@@ -489,12 +604,21 @@ char* pseudocode_format_expression(const Expression *expr) {
         case EXPR_FUNCTION_CALL:
             snprintf(result, 1024, "%s(...)", expr->call.name);
             break;
-            
+
+        case EXPR_TERNARY: {
+            char *cond_s = pseudocode_format_expression(expr->ternary.condition);
+            char *true_s = pseudocode_format_expression(expr->ternary.trueExpr);
+            char *fals_s = pseudocode_format_expression(expr->ternary.falseExpr);
+            snprintf(result, 1024, "(%s ? %s : %s)", cond_s, true_s, fals_s);
+            free(cond_s); free(true_s); free(fals_s);
+            break;
+        }
+
         default:
             snprintf(result, 1024, "<expr>");
             break;
     }
-    
+
     return result;
 }
 
@@ -527,56 +651,124 @@ Statement** pseudocode_reconstruct_control_flow(
     Statement **statements = calloc(count, sizeof(Statement*));
     int stmtCount = 0;
     
+    // Helper: build condition string from CMP state + suffix
+    #define COND_FROM_CMP(buf, sz, suffix_cmp, suffix_cmp_inv) do { \
+        if (ctx->has_pending_cmp) { \
+            snprintf((buf), (sz), "(%s %s %s)", ctx->last_cmp_left, (suffix_cmp), ctx->last_cmp_right); \
+        } else { \
+            snprintf((buf), (sz), "(%s)", (suffix_cmp_inv)); \
+        } \
+    } while(0)
+
     for (int i = 0; i < count; i++) {
         const PseudocodeInstruction *inst = &instructions[i];
         Statement *stmt = NULL;
-        
-        if (strcmp(inst->mnemonic, "ret") == 0 || strcmp(inst->mnemonic, "RET") == 0) {
+        const char *mn = inst->mnemonic;
+
+        // CMP/CMN/TST/SUBS — save operands to ctx, emit no statement
+        if (strncasecmp(mn, "cmp", 3) == 0 || strncasecmp(mn, "cmn", 3) == 0 ||
+            strncasecmp(mn, "tst", 3) == 0) {
+            char left[64] = {0}, right[64] = {0};
+            if (sscanf(inst->operands, "%[^,], %63s", left, right) == 2) {
+                snprintf(ctx->last_cmp_left,  sizeof(ctx->last_cmp_left),  "%s", left);
+                // CMN negates right side; TST uses & semantics — annotate in right operand
+                if (strncasecmp(mn, "cmn", 3) == 0) {
+                    snprintf(ctx->last_cmp_right, sizeof(ctx->last_cmp_right), "-%s", right);
+                } else if (strncasecmp(mn, "tst", 3) == 0) {
+                    snprintf(ctx->last_cmp_right, sizeof(ctx->last_cmp_right), "(%s & %s)", left, right);
+                    snprintf(ctx->last_cmp_left,  sizeof(ctx->last_cmp_left),  "0");
+                } else {
+                    snprintf(ctx->last_cmp_right, sizeof(ctx->last_cmp_right), "%s", right);
+                }
+                ctx->has_pending_cmp = true;
+            }
+            continue; // no statement for CMP
+        }
+
+        // SUBS to zero is CMP alias (e.g. "subs xzr, x0, x1")
+        if (strncasecmp(mn, "subs", 4) == 0) {
+            char dest[32], left[64], right[64];
+            if (sscanf(inst->operands, "%[^,], %[^,], %63s", dest, left, right) == 3 &&
+                (strncmp(dest, "xzr", 3) == 0 || strncmp(dest, "wzr", 3) == 0)) {
+                snprintf(ctx->last_cmp_left,  sizeof(ctx->last_cmp_left),  "%s", left);
+                snprintf(ctx->last_cmp_right, sizeof(ctx->last_cmp_right), "%s", right);
+                ctx->has_pending_cmp = true;
+                // still fall through to emit a normal SUBS statement below
+            }
+        }
+
+        if (strcmp(mn, "ret") == 0 || strcmp(mn, "RET") == 0 ||
+            strncasecmp(mn, "retaa", 5) == 0 || strncasecmp(mn, "retab", 5) == 0) {
             stmt = calloc(1, sizeof(Statement));
             stmt->type = STMT_RETURN;
             stmt->address = inst->address;
             stmt->returnStmt.value = create_variable_expr("x0");
         }
 
-        else if (strncmp(inst->mnemonic, "b", 1) == 0 && strcmp(inst->mnemonic, "bl") != 0 && strcmp(inst->mnemonic, "blr") != 0) {
+        else if (strncmp(mn, "b", 1) == 0 && strncasecmp(mn, "bl", 2) != 0 && strncasecmp(mn, "blr", 3) != 0) {
             stmt = calloc(1, sizeof(Statement));
-            
-            if (strchr(inst->mnemonic, '.') != NULL || 
-                strncmp(inst->mnemonic, "cb", 2) == 0 ||
-                strncmp(inst->mnemonic, "tb", 2) == 0) {
-                
+
+            if (strchr(mn, '.') != NULL ||
+                strncasecmp(mn, "cb", 2) == 0 ||
+                strncasecmp(mn, "tb", 2) == 0) {
+
                 stmt->type = STMT_IF;
                 stmt->address = inst->address;
-                
+
                 Expression *cond = calloc(1, sizeof(Expression));
                 cond->type = EXPR_VARIABLE;
-                
-                if (strstr(inst->mnemonic, ".eq")) {
-                    strcpy(cond->variable.name, "(flags == 0)");
-                } else if (strstr(inst->mnemonic, ".ne")) {
-                    strcpy(cond->variable.name, "(flags != 0)");
-                } else if (strstr(inst->mnemonic, ".lt")) {
-                    strcpy(cond->variable.name, "(signed_less)");
-                } else if (strstr(inst->mnemonic, ".gt")) {
-                    strcpy(cond->variable.name, "(signed_greater)");
-                } else if (strncmp(inst->mnemonic, "cbz", 3) == 0) {
+                char cbuf[sizeof(cond->variable.name)];
+
+                // b.cond — use saved CMP operands when available
+                if (strstr(mn, ".eq") || strncasecmp(mn, "b.eq", 4) == 0) {
+                    COND_FROM_CMP(cbuf, sizeof(cbuf), "==", "flags_eq");
+                } else if (strstr(mn, ".ne") || strncasecmp(mn, "b.ne", 4) == 0) {
+                    COND_FROM_CMP(cbuf, sizeof(cbuf), "!=", "flags_ne");
+                } else if (strstr(mn, ".lt") || strncasecmp(mn, "b.lt", 4) == 0) {
+                    COND_FROM_CMP(cbuf, sizeof(cbuf), "<",  "flags_lt");
+                } else if (strstr(mn, ".gt") || strncasecmp(mn, "b.gt", 4) == 0) {
+                    COND_FROM_CMP(cbuf, sizeof(cbuf), ">",  "flags_gt");
+                } else if (strstr(mn, ".le") || strncasecmp(mn, "b.le", 4) == 0) {
+                    COND_FROM_CMP(cbuf, sizeof(cbuf), "<=", "flags_le");
+                } else if (strstr(mn, ".ge") || strncasecmp(mn, "b.ge", 4) == 0) {
+                    COND_FROM_CMP(cbuf, sizeof(cbuf), ">=", "flags_ge");
+                } else if (strstr(mn, ".lo") || strncasecmp(mn, "b.lo", 4) == 0) {
+                    COND_FROM_CMP(cbuf, sizeof(cbuf), "<",  "flags_lo");
+                } else if (strstr(mn, ".hi") || strncasecmp(mn, "b.hi", 4) == 0) {
+                    COND_FROM_CMP(cbuf, sizeof(cbuf), ">",  "flags_hi");
+                } else if (strstr(mn, ".ls") || strncasecmp(mn, "b.ls", 4) == 0) {
+                    COND_FROM_CMP(cbuf, sizeof(cbuf), "<=", "flags_ls");
+                } else if (strstr(mn, ".hs") || strncasecmp(mn, "b.hs", 4) == 0) {
+                    COND_FROM_CMP(cbuf, sizeof(cbuf), ">=", "flags_hs");
+                } else if (strncasecmp(mn, "cbz", 3) == 0) {
                     char reg[32];
-                    if (sscanf(inst->operands, "%[^,]", reg) == 1) {
-                        snprintf(cond->variable.name, sizeof(cond->variable.name), "(%s == 0)", reg);
-                    } else {
-                        strcpy(cond->variable.name, "(reg == 0)");
-                    }
-                } else if (strncmp(inst->mnemonic, "cbnz", 4) == 0) {
+                    if (sscanf(inst->operands, "%[^,]", reg) == 1)
+                        snprintf(cbuf, sizeof(cbuf), "(%s == 0)", reg);
+                    else
+                        snprintf(cbuf, sizeof(cbuf), "(reg == 0)");
+                } else if (strncasecmp(mn, "cbnz", 4) == 0) {
                     char reg[32];
-                    if (sscanf(inst->operands, "%[^,]", reg) == 1) {
-                        snprintf(cond->variable.name, sizeof(cond->variable.name), "(%s != 0)", reg);
-                    } else {
-                        strcpy(cond->variable.name, "(reg != 0)");
-                    }
+                    if (sscanf(inst->operands, "%[^,]", reg) == 1)
+                        snprintf(cbuf, sizeof(cbuf), "(%s != 0)", reg);
+                    else
+                        snprintf(cbuf, sizeof(cbuf), "(reg != 0)");
+                } else if (strncasecmp(mn, "tbz", 3) == 0) {
+                    char reg[32]; int bit = 0;
+                    if (sscanf(inst->operands, "%[^,], #%d", reg, &bit) == 2)
+                        snprintf(cbuf, sizeof(cbuf), "(%s & (1 << %d)) == 0", reg, bit);
+                    else
+                        snprintf(cbuf, sizeof(cbuf), "bit_zero");
+                } else if (strncasecmp(mn, "tbnz", 4) == 0) {
+                    char reg[32]; int bit = 0;
+                    if (sscanf(inst->operands, "%[^,], #%d", reg, &bit) == 2)
+                        snprintf(cbuf, sizeof(cbuf), "(%s & (1 << %d)) != 0", reg, bit);
+                    else
+                        snprintf(cbuf, sizeof(cbuf), "bit_nonzero");
                 } else {
-                    strcpy(cond->variable.name, "condition");
+                    snprintf(cbuf, sizeof(cbuf), "condition");
                 }
-                
+                snprintf(cond->variable.name, sizeof(cond->variable.name), "%s", cbuf);
+
                 stmt->ifStmt.condition = cond;
                 stmt->ifStmt.thenBlock = NULL;
                 stmt->ifStmt.thenCount = 0;
@@ -812,14 +1004,46 @@ PseudoFunction* pseudocode_generate_function(
     func->returnType->size = 8;
     strcpy(func->returnType->name, "uint64_t");
     
-    func->paramCount = 4;
+    // Infer param count: scan first 64 instructions for x0-x7 used as source
+    // before appearing as destination. Highest such index + 1 = param count.
+    bool reg_written[8] = {false};
+    int max_param_reg = -1;
+    int scan_limit = count < 64 ? count : 64;
+    for (int i = 0; i < scan_limit; i++) {
+        const char *ops = instructions[i].operands;
+        // ARM64 arg regs: x0-x7, w0-w7
+        for (int r = 0; r <= 7; r++) {
+            char xreg[8], wreg[8];
+            snprintf(xreg, sizeof(xreg), "x%d", r);
+            snprintf(wreg, sizeof(wreg), "w%d", r);
+            // Check if it's a source (appears after the first comma)
+            const char *after_dest = strchr(ops, ',');
+            if (after_dest && (strstr(after_dest, xreg) || strstr(after_dest, wreg))) {
+                if (!reg_written[r] && r > max_param_reg) {
+                    max_param_reg = r;
+                }
+            }
+            // Mark as written if it's the destination (first operand)
+            char dest_check[32] = {0};
+            if (sscanf(ops, "%31[^,]", dest_check) == 1) {
+                char *p = dest_check;
+                while (*p == ' ') p++;
+                if (strcmp(p, xreg) == 0 || strcmp(p, wreg) == 0) {
+                    reg_written[r] = true;
+                }
+            }
+        }
+    }
+    func->paramCount = (max_param_reg >= 0) ? (max_param_reg + 1) : 0;
+    if (func->paramCount == 0) func->paramCount = 1; // at minimum assume void return func with no args shown
+
     func->paramNames = calloc(func->paramCount, sizeof(char*));
     func->paramTypes = calloc(func->paramCount, sizeof(PseudoTypeInfo*));
-    
+
     for (int i = 0; i < func->paramCount; i++) {
         func->paramNames[i] = malloc(32);
         snprintf(func->paramNames[i], 32, "arg%d", i);
-        
+
         func->paramTypes[i] = calloc(1, sizeof(PseudoTypeInfo));
         func->paramTypes[i]->type = TYPE_UINT64;
         func->paramTypes[i]->size = 8;
@@ -924,12 +1148,25 @@ static int format_expression_inline(const Expression *expr, char *buffer) {
             buffer += sprintf(buffer, ")");
             buffer += format_expression_inline(expr->cast.expr, buffer);
             break;
-            
+
+        case EXPR_TERNARY:
+            buffer += sprintf(buffer, "(");
+            if (expr->ternary.condition)
+                buffer += format_expression_inline(expr->ternary.condition, buffer);
+            buffer += sprintf(buffer, " ? ");
+            if (expr->ternary.trueExpr)
+                buffer += format_expression_inline(expr->ternary.trueExpr, buffer);
+            buffer += sprintf(buffer, " : ");
+            if (expr->ternary.falseExpr)
+                buffer += format_expression_inline(expr->ternary.falseExpr, buffer);
+            buffer += sprintf(buffer, ")");
+            break;
+
         default:
             buffer += sprintf(buffer, "<expr>");
             break;
     }
-    
+
     return buffer - start;
 }
 

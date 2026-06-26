@@ -34,6 +34,9 @@ final class NavigationHistoryManager {
 
     // MARK: - State
 
+    /// Serial queue for thread-safe access to mutable state.
+    private let queue = DispatchQueue(label: "com.redyne.navigationHistory")
+
     /// The ordered list of navigation entries.
     private(set) var entries: [NavigationEntry] = []
 
@@ -48,71 +51,70 @@ final class NavigationHistoryManager {
 
     /// Whether there is at least one entry behind the current position.
     var canGoBack: Bool {
-        return currentIndex > 0
+        return queue.sync { currentIndex > 0 }
     }
 
     /// Whether there is at least one entry ahead of the current position.
     var canGoForward: Bool {
-        return currentIndex < entries.count - 1
+        return queue.sync { currentIndex < entries.count - 1 }
     }
 
     /// Records a new navigation entry.
-    ///
-    /// - If the user has gone back and then performs a new navigation, the forward history is discarded.
-    /// - Consecutive duplicate entries are coalesced (not added twice in a row).
-    /// - The stack is trimmed from the front when it exceeds `maxDepth`.
     func push(entry: NavigationEntry) {
-        // Don't record while replaying back/forward.
-        guard !isReplaying else { return }
+        queue.sync {
+            guard !isReplaying else { return }
 
-        // Coalesce consecutive identical entries.
-        if currentIndex >= 0, currentIndex < entries.count, entries[currentIndex] == entry {
-            return
-        }
+            if currentIndex >= 0, currentIndex < entries.count, entries[currentIndex] == entry {
+                return
+            }
 
-        // Discard forward history.
-        if currentIndex < entries.count - 1 {
-            entries.removeSubrange((currentIndex + 1)...)
-        }
+            if currentIndex < entries.count - 1 {
+                entries.removeSubrange((currentIndex + 1)...)
+            }
 
-        entries.append(entry)
-        currentIndex = entries.count - 1
+            entries.append(entry)
+            currentIndex = entries.count - 1
 
-        // Enforce max depth by trimming the oldest entries.
-        if entries.count > NavigationHistoryManager.maxDepth {
-            let overflow = entries.count - NavigationHistoryManager.maxDepth
-            entries.removeFirst(overflow)
-            currentIndex -= overflow
+            if entries.count > NavigationHistoryManager.maxDepth {
+                let overflow = entries.count - NavigationHistoryManager.maxDepth
+                entries.removeFirst(overflow)
+                currentIndex -= overflow
+            }
         }
     }
 
     /// Moves one step back in the history and returns the entry to navigate to.
-    /// Returns `nil` if there is no previous entry.
     func goBack() -> NavigationEntry? {
-        guard canGoBack else { return nil }
-        currentIndex -= 1
-        return entries[currentIndex]
+        return queue.sync {
+            guard canGoBack else { return nil }
+            currentIndex -= 1
+            return entries[currentIndex]
+        }
     }
 
     /// Moves one step forward in the history and returns the entry to navigate to.
-    /// Returns `nil` if there is no next entry.
     func goForward() -> NavigationEntry? {
-        guard canGoForward else { return nil }
-        currentIndex += 1
-        return entries[currentIndex]
+        return queue.sync {
+            guard canGoForward else { return nil }
+            currentIndex += 1
+            return entries[currentIndex]
+        }
     }
 
     /// Executes `body` while suppressing `push(entry:)` calls.
-    /// Use this when replaying a history entry to avoid polluting the stack.
     func performWithoutRecording(_ body: () -> Void) {
-        isReplaying = true
-        body()
-        isReplaying = false
+        queue.sync {
+            isReplaying = true
+            body()
+            isReplaying = false
+        }
     }
 
     /// Removes all history entries and resets the cursor.
     func clear() {
-        entries.removeAll()
-        currentIndex = -1
+        queue.sync {
+            entries.removeAll()
+            currentIndex = -1
+        }
     }
 }

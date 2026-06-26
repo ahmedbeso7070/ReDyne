@@ -201,7 +201,11 @@ bool reloc_parse_bind(RelocationContext *ctx) {
     
     fseek(ctx->macho_ctx->file, ctx->macho_ctx->bind_off, SEEK_SET);
     uint8_t *bind_data = malloc(ctx->macho_ctx->bind_size);
-    fread(bind_data, 1, ctx->macho_ctx->bind_size, ctx->macho_ctx->file);
+    if (!bind_data) return false;
+    if (fread(bind_data, 1, ctx->macho_ctx->bind_size, ctx->macho_ctx->file) != ctx->macho_ctx->bind_size) {
+        free(bind_data);
+        return false;
+    }
     
     BindType type = REDYNE_BIND_TYPE_POINTER;
     int32_t library_ordinal = 0;
@@ -385,7 +389,11 @@ bool reloc_parse_lazy_bind(RelocationContext *ctx) {
     
     fseek(ctx->macho_ctx->file, ctx->macho_ctx->lazy_bind_off, SEEK_SET);
     uint8_t *lazy_data = malloc(ctx->macho_ctx->lazy_bind_size);
-    fread(lazy_data, 1, ctx->macho_ctx->lazy_bind_size, ctx->macho_ctx->file);
+    if (!lazy_data) return false;
+    if (fread(lazy_data, 1, ctx->macho_ctx->lazy_bind_size, ctx->macho_ctx->file) != ctx->macho_ctx->lazy_bind_size) {
+        free(lazy_data);
+        return false;
+    }
     
     BindType type = REDYNE_BIND_TYPE_POINTER;
     int32_t library_ordinal = 0;
@@ -462,7 +470,11 @@ bool reloc_parse_weak_bind(RelocationContext *ctx) {
     
     fseek(ctx->macho_ctx->file, ctx->macho_ctx->weak_bind_off, SEEK_SET);
     uint8_t *weak_data = malloc(ctx->macho_ctx->weak_bind_size);
-    fread(weak_data, 1, ctx->macho_ctx->weak_bind_size, ctx->macho_ctx->file);
+    if (!weak_data) return false;
+    if (fread(weak_data, 1, ctx->macho_ctx->weak_bind_size, ctx->macho_ctx->file) != ctx->macho_ctx->weak_bind_size) {
+        free(weak_data);
+        return false;
+    }
     
     BindType type = REDYNE_BIND_TYPE_POINTER;
     int32_t library_ordinal = 0;

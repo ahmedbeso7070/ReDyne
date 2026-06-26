@@ -76,11 +76,8 @@ public class PseudocodeService {
             }
             
             if let name = functionName {
-                var namePtr: UnsafePointer<CChar>? = nil
                 name.withCString { ptr in
-                    namePtr = ptr
-                }
-                if namePtr != nil {
+                    var namePtr: UnsafePointer<CChar>? = ptr
                     withUnsafeMutablePointer(to: &namePtr) { ptrToPtr in
                         pseudocode_generator_set_function_name(generator, ptrToPtr)
                     }
@@ -425,11 +422,7 @@ extension PseudocodeOutput.HighlightType {
 
 extension Character {
     var isHexDigit: Bool {
-        return isHexDigit(self)
-    }
-    
-    private func isHexDigit(_ c: Character) -> Bool {
-        return ("0"..."9").contains(c) || ("a"..."f").contains(c) || ("A"..."F").contains(c)
+        return ("0"..."9").contains(self) || ("a"..."f").contains(self) || ("A"..."F").contains(self)
     }
 }
 

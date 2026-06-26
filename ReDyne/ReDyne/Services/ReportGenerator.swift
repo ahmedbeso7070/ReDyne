@@ -348,7 +348,14 @@ class ReportGenerator {
             return ""
         }
 
-        var html = """
+        // Pre-group sections by segment name for O(1) lookup instead of O(S×T) filtering
+        var sectionsBySegment: [String: [SectionModel]] = [:]
+        for section in output.sections {
+            sectionsBySegment[section.segmentName, default: []].append(section)
+        }
+
+        var parts: [String] = []
+        parts.append("""
         <div class="section">
             <h2 class="section-title">Segments &amp; Sections</h2>
             <div class="table-container">
@@ -364,11 +371,11 @@ class ReportGenerator {
                         </tr>
                     </thead>
                     <tbody>
-        """
+        """)
 
         for (index, segment) in output.segments.enumerated() {
             let rowClass = index % 2 == 0 ? "row-even" : "row-odd"
-            html += """
+            parts.append("""
                         <tr class="\(rowClass)">
                             <td><strong>\(escapeHTML(segment.name))</strong></td>
                             <td><code>\(Constants.formatAddress(segment.vmAddress))</code></td>
@@ -377,31 +384,31 @@ class ReportGenerator {
                             <td>\(Constants.formatBytes(Int64(segment.fileSize)))</td>
                             <td><span class="prot-badge">\(escapeHTML(segment.protection))</span></td>
                         </tr>
-            """
+            """)
 
-            // List sections within this segment
-            let childSections = output.sections.filter { $0.segmentName == segment.name }
-            for section in childSections {
-                html += """
-                        <tr class="\(rowClass) section-row">
-                            <td class="section-indent">\(escapeHTML(section.sectionName))</td>
-                            <td><code>\(Constants.formatAddress(section.address))</code></td>
-                            <td>\(Constants.formatBytes(Int64(section.size)))</td>
-                            <td><code>0x\(String(format: "%X", section.offset))</code></td>
-                            <td></td>
-                            <td></td>
-                        </tr>
-                """
+            if let childSections = sectionsBySegment[segment.name] {
+                for section in childSections {
+                    parts.append("""
+                            <tr class="\(rowClass) section-row">
+                                <td class="section-indent">\(escapeHTML(section.sectionName))</td>
+                                <td><code>\(Constants.formatAddress(section.address))</code></td>
+                                <td>\(Constants.formatBytes(Int64(section.size)))</td>
+                                <td><code>0x\(String(format: "%X", section.offset))</code></td>
+                                <td></td>
+                                <td></td>
+                            </tr>
+                    """)
+                }
             }
         }
 
-        html += """
+        parts.append("""
                     </tbody>
                 </table>
             </div>
         </div>
-        """
-        return html
+        """)
+        return parts.joined()
     }
 
     // MARK: - Section 5: Symbol Table

@@ -55,8 +55,14 @@ class BookmarkStore {
     private let fileManager = FileManager.default
     private let queue = DispatchQueue(label: "com.redyne.bookmarkStore", attributes: .concurrent)
 
+    /// Maximum number of binaries to keep in the in-memory cache.
+    private static let maxCacheSize = 20
+
     /// In-memory cache keyed by binary UUID.
     private var cache: [String: BookmarkData] = [:]
+
+    /// Tracks access order for LRU eviction (most recent at the end).
+    private var cacheAccessOrder: [String] = []
 
     private init() {}
 
@@ -154,8 +160,18 @@ class BookmarkStore {
 
     // MARK: - Persistence
 
+    private func touchCacheEntry(_ uuid: String) {
+        cacheAccessOrder.removeAll { $0 == uuid }
+        cacheAccessOrder.append(uuid)
+        while cacheAccessOrder.count > BookmarkStore.maxCacheSize {
+            let evicted = cacheAccessOrder.removeFirst()
+            cache.removeValue(forKey: evicted)
+        }
+    }
+
     private func loadData(forBinaryUUID uuid: String) -> BookmarkData {
         if let cached = cache[uuid] {
+            touchCacheEntry(uuid)
             return cached
         }
 
@@ -171,6 +187,7 @@ class BookmarkStore {
             let raw = try Data(contentsOf: url)
             let data = try decoder.decode(BookmarkData.self, from: raw)
             cache[uuid] = data
+            touchCacheEntry(uuid)
             return data
         } catch {
             print("BookmarkStore: Failed to load data for \(uuid): \(error)")
@@ -180,6 +197,7 @@ class BookmarkStore {
 
     private func saveData(_ data: BookmarkData, forBinaryUUID uuid: String) {
         cache[uuid] = data
+        touchCacheEntry(uuid)
 
         guard let url = fileURL(forBinaryUUID: uuid) else { return }
 
