@@ -16,7 +16,7 @@ jobs:
       - name: Install Xcode tools
         run: |
           xcode-select --print-path
-          xcodebuild --version
+          xcodebuild -version
 
       - name: Build project
         run: |
