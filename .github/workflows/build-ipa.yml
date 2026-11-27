@@ -21,7 +21,7 @@ jobs:
       - name: Build project
         run: |
           xcodebuild \
-            -workspace ReDyne.xcworkspace \
+            -project ReDyne/ReDyne.xcodeproj \
             -scheme ReDyne \
             -configuration Release \
             -sdk iphoneos \
