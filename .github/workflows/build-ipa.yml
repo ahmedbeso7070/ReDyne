@@ -1,42 +1,21 @@
-name: Build ReDyne IPA
+- name: Build unsigned archive
+  run: |
+    xcodebuild \
+      -project ReDyne/ReDyne.xcodeproj \
+      -scheme ReDyne \
+      -configuration Release \
+      -sdk iphoneos \
+      -archivePath ./ReDyne.xcarchive \
+      IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+      CODE_SIGN_STYLE=Manual \
+      CODE_SIGNING_ALLOWED=NO \
+      CODE_SIGNING_REQUIRED=NO \
+      DEVELOPMENT_TEAM='' \
+      archive
 
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: macos-15
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Xcode tools
-        run: |
-          xcode-select --print-path
-          xcodebuild -version
-
-      - name: Build project
-        run: |
-          xcodebuild \
-            -project ReDyne/ReDyne.xcodeproj \
-            -scheme ReDyne \
-            -configuration Release \
-            -sdk iphoneos \
-            -archivePath ./ReDyne.xcarchive \
-            archive
-
-      - name: Export IPA
-        run: |
-          xcodebuild -exportArchive \
-            -archivePath ./ReDyne.xcarchive \
-            -exportPath ./ReDyne.ipa \
-            -exportOptionsPlist ExportOptions.plist
-
-      - name: Upload IPA artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ReDyne-IPA
-          path: ReDyne.ipa
+- name: Package TrollStore IPA
+  run: |
+    rm -rf Payload ReDyne.ipa
+    mkdir Payload
+    cp -R ReDyne.xcarchive/Products/Applications/ReDyne.app Payload/
+    ditto -c -k --sequesterRsrc Payload ReDyne.ipa
