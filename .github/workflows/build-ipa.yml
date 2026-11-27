@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: xcodebuild-15.
     permissions:
       contents: write
 
